@@ -18,6 +18,7 @@ git2 = "0.14.3"
 rand = "0.8.5"
 rsa = "0.6.1"
 clap = { version = "3.1.18", features = ["derive", "env", "unicode", "wrap_help"] }
+printpdf = "0.5.0"
 
 [dependencies.rusqlite]
 version = "0.27.0"

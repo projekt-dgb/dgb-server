@@ -666,6 +666,29 @@ pub struct PdfToTextSeite {
     pub texte: Vec<Textblock>,
 }
 
+fn generate_pdf() -> Vec<u8> {
+    use printpdf::*;
+    let (doc, page1, layer1) = PdfDocument::new("PDF_Document_title", Mm(247.0), Mm(210.0), "Layer 1");
+    let (page2, layer1) = doc.add_page(Mm(10.0), Mm(250.0),"Page 2, Layer 1");
+    doc.save_to_bytes().unwrap_or_default()
+}
+
+#[get("/download/{amtsgericht}/{grundbuch_von}/{blatt}.pdf")]
+async fn dowload_pdf(path: web::Path<(String, String, usize)>, req: HttpRequest) -> impl Responder {
+    
+    let auth = UrlEncodedData::parse_str(req.query_string());
+    let auth = AuthFormData {
+        benutzer: auth.get_first("benutzer").map(|s| s.to_string()).unwrap(),
+        email: auth.get_first("email").map(|s| s.to_string()).unwrap(),
+        passwort: auth.get_first("passwort").map(|s| s.to_string()).unwrap(),
+        pkey: auth.get_first("pkey").map(|s| s.to_string()),
+    };
+        
+    HttpResponse::Ok()
+    .content_type("application/pdf")
+    .body(generate_pdf())
+}
+
 #[get("/download/{amtsgericht}/{grundbuch_von}/{blatt}.gbx")]
 async fn download(path: web::Path<(String, String, usize)>, req: HttpRequest) -> impl Responder {
     
@@ -677,8 +700,18 @@ async fn download(path: web::Path<(String, String, usize)>, req: HttpRequest) ->
         pkey: auth.get_first("pkey").map(|s| s.to_string()),
     };
 
-    let folder_path = std::env::current_exe().unwrap().parent().unwrap().join("data");
     let (amtsgericht, grundbuch_von, blatt) = &*path;
+    let gemarkungen = get_gemarkungen().unwrap_or_default();
+    if !gemarkungen.iter().any(|(land, ag, bezirk)| ag == amtsgericht && bezirk == grundbuch_von) {
+        return HttpResponse::Ok()
+        .content_type("application/json")
+        .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+            code: 1,
+            text: format!("Ungültiges Amtsgericht oder ungültige Gemarkung: {amtsgericht}/{grundbuch_von}"),
+        })).unwrap_or_default());
+    }
+        
+    let folder_path = std::env::current_exe().unwrap().parent().unwrap().join("data");
     
     let file: Option<PdfFile> = if amtsgericht == "*" {
         
@@ -786,10 +819,22 @@ async fn upload(upload_changeset: web::Json<UploadChangeset>, req: HttpRequest) 
         geaendert: BTreeMap::new(),
     };
 
+    let gemarkungen = get_gemarkungen().unwrap_or_default();
+    
     for (name, neu) in upload_changeset.neue_dateien.iter() {
         
         let amtsgericht = &neu.titelblatt.amtsgericht;
         let grundbuch = &neu.titelblatt.grundbuch_von;
+        
+        if !gemarkungen.iter().any(|(land, ag, bezirk)| ag == amtsgericht && bezirk == grundbuch) {
+            return HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                code: 1,
+                text: format!("Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}", amtsgericht, grundbuch),
+            })).unwrap_or_default());
+        }
+        
         let blatt = neu.titelblatt.blatt;
         let target_path = folder_path.clone().join(amtsgericht).join(grundbuch).join(&format!("{grundbuch}_{blatt}.gbx"));
         let target_json = serde_json::to_string_pretty(&neu).unwrap_or_default();
@@ -805,6 +850,16 @@ async fn upload(upload_changeset: web::Json<UploadChangeset>, req: HttpRequest) 
         
         let amtsgericht = &geaendert.neu.titelblatt.amtsgericht;
         let grundbuch = &geaendert.neu.titelblatt.grundbuch_von;
+        
+        if !gemarkungen.iter().any(|(land, ag, bezirk)| ag == amtsgericht && bezirk == grundbuch) {
+            return HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                code: 1,
+                text: format!("Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}", amtsgericht, grundbuch),
+            })).unwrap_or_default());
+        }
+        
         let blatt = geaendert.neu.titelblatt.blatt;
         let target_path = folder_path.clone().join(amtsgericht).join(grundbuch).join(&format!("{grundbuch}_{blatt}.gbx"));
         let target_json = serde_json::to_string_pretty(&geaendert.neu).unwrap_or_default();
@@ -992,6 +1047,28 @@ fn create_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), S
     Ok(())
 }
 
+pub type Bezirke = Vec<(String, String, String)>;
+
+fn get_gemarkungen() -> Result<Bezirke, String> {
+
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    let mut stmt = conn.prepare("SELECT land, amtsgericht, bezirk FROM bezirke")
+    .map_err(|e| format!("Fehler beim Auslesen der Bezirke"))?;
+    
+    let bezirke = stmt.query_map([], |row| { Ok((
+        row.get::<usize, String>(0)?, 
+        row.get::<usize, String>(1)?, 
+        row.get::<usize, String>(2)?)) 
+    })
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    let mut bz = Vec::new();
+    for b in bezirke { if let Ok(b) = b { bz.push(b); } }
+    Ok(bz)
+}
+
 fn delete_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), String> {
 
     let conn = Connection::open(get_db_path())
@@ -1005,7 +1082,12 @@ fn delete_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), S
     Ok(())
 }
 
-fn create_user(name: &str, email: &str, passwort: &str, rechte: &str) -> Result<(), String> {
+fn create_user(
+    name: &str, 
+    email: &str, 
+    passwort: &str, 
+    rechte: &str
+) -> Result<(), String> {
 
     let mut rng = rand::thread_rng();
     let bits = 2048;
@@ -1320,6 +1402,7 @@ async fn main() -> std::io::Result<()> {
         .app_data(json_cfg)
         .service(suche)
         .service(download)
+        .service(dowload_pdf)
         .service(upload)
     })
     .bind((args.ip, if args.https { 443 } else { 80 }))?
