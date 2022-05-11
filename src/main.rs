@@ -7,6 +7,8 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 use rusqlite::{params, OpenFlags, Connection};
 use rsa::{RsaPrivateKey, pkcs1::LineEnding, PublicKey, pkcs8::{EncodePrivateKey, DecodePrivateKey}, RsaPublicKey, PaddingScheme};
+use clap::Parser;
+use std::str::FromStr;
 
 lazy_static! {
     static ref RE: Regex = Regex::new("(\\w*)\\s*(\\d*)").unwrap();
@@ -948,6 +950,7 @@ fn create_database() -> Result<(), rusqlite::Error> {
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 email           VARCHAR(255) UNIQUE NOT NULL,
                 name            VARCHAR(255) NOT NULL,
+                rechte          VARCHAR(255) NOT NULL,
                 password_hashed BLOB NOT NULL
         )",
         [],
@@ -957,7 +960,18 @@ fn create_database() -> Result<(), rusqlite::Error> {
         "CREATE TABLE IF NOT EXISTS bezirke (
             land            VARCHAR(255) NOT NULL,
             amtsgericht     VARCHAR(255) NOT NULL,
-            gemarkung       VARCHAR(255) NOT NULL
+            bezirk          VARCHAR(255) NOT NULL
+        )",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS abonnements (
+            email            VARCHAR(1023) NOT NULL,
+            amtsgericht      VARCHAR(255) NOT NULL,
+            bezirk           VARCHAR(255) NOT NULL,
+            blatt            INTEGER NOT NULL,
+            aktenzeichen     VARCHAR(1023) NOT NULL
         )",
         [],
     )?;
@@ -965,31 +979,33 @@ fn create_database() -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
-fn create_gemarkung(land: String, amtsgericht: String, gemarkung: String) -> Result<(), rusqlite::Error> {
+fn create_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), String> {
 
-    let conn = Connection::open(get_db_path())?;
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
-        "INSERT INTO bezirke (land, amtsgericht, gemarkung) VALUES (?1, ?2, ?3) ON CONFLICT DO UPDATE",
-        params![land, amtsgericht, gemarkung],
-    )?;
+        "INSERT INTO bezirke (land, amtsgericht, bezirk) VALUES (?1, ?2, ?3)",
+        params![land, amtsgericht, bezirk],
+    ).map_err(|e| format!("Fehler beim Einfügen von {land}/{amtsgericht}/{bezirk} in Datenbank: {e}"))?;
     
     Ok(())
 }
 
-fn delete_gemarkung(land: String, amtsgericht: String, gemarkung: String) -> Result<(), rusqlite::Error> {
+fn delete_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), String> {
 
-    let conn = Connection::open(get_db_path())?;
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
-        "DELET FROM bezirke WHERE land = ?1 AND amtsgericht = ?2 AND gemarkung = ?3",
-        params![land, amtsgericht, gemarkung],
-    )?;
+        "DELETE FROM bezirke WHERE land = ?1 AND amtsgericht = ?2 AND bezirk = ?3",
+        params![land, amtsgericht, bezirk],
+    ).map_err(|e| format!("Fehler beim Löschen von {land}/{amtsgericht}/{bezirk} in Datenbank: {e}"))?;
     
     Ok(())
 }
 
-fn create_user(name: String, email: String, passwort: String) -> Result<(), String> {
+fn create_user(name: &str, email: &str, passwort: &str, rechte: &str) -> Result<(), String> {
 
     let mut rng = rand::thread_rng();
     let bits = 2048;
@@ -1014,14 +1030,14 @@ fn create_user(name: String, email: String, passwort: String) -> Result<(), Stri
     .map_err(|e| format!("Fehler beim Schreiben von {email}.pem: {e}"))?;
     
     conn.execute(
-        "INSERT INTO benutzer (email, name, password_hashed) VALUES (?1, ?2, ?3)",
-        params![email, name, password_hashed],
+        "INSERT INTO benutzer (email, name, rechte, password_hashed) VALUES (?1, ?2, ?3, ?4)",
+        params![email, name, rechte, password_hashed],
     ).map_err(|e| format!("Fehler beim Einfügen von {email} in Datenbank: {e}"))?;
     
     Ok(())
 }
 
-fn validate_user(name: String, email: String, passwort: String, private_key: String) -> Result<i32, String> {
+fn validate_user(name: &str, email: &str, passwort: &str, private_key: &str) -> Result<String, String> {
 
     let private_key = RsaPrivateKey::from_pkcs8_pem(&private_key)
     .map_err(|e| format!("Ungültiger privater Schlüssel"))?;
@@ -1030,15 +1046,15 @@ fn validate_user(name: String, email: String, passwort: String, private_key: Str
     .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
     
     let mut stmt = conn.prepare(
-        "SELECT id, password_hashed FROM benutzer WHERE email = ?1 AND name = ?2"
+        "SELECT id, rolle, password_hashed FROM benutzer WHERE email = ?1 AND name = ?2"
     ).map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
         
-    let benutzer = stmt.query_map(params![email, name], |row| { Ok((row.get::<usize, i32>(0)?, row.get::<usize, Vec<u8>>(1)?)) })
+    let benutzer = stmt.query_map(params![email, name], |row| { Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(1)?, row.get::<usize, Vec<u8>>(2)?)) })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
         .collect::<Vec<_>>();
     
-    let (id, pw) = match benutzer.get(0) {
-        Some(Ok((id, pw))) => (id, pw),
+    let (id, rolle, pw) = match benutzer.get(0) {
+        Some(Ok((id, rolle, pw))) => (id, rolle, pw),
         _ => return Err(format!("Kein Benutzer für \"{name} <{email}>\" gefunden")),
     };
     
@@ -1052,10 +1068,10 @@ fn validate_user(name: String, email: String, passwort: String, private_key: Str
         return Err(format!("Ungültiges Passwort"));
     }
     
-    Ok(*id)
+    Ok(rolle.clone())
 }
 
-fn delete_user(email: String) -> Result<(), String> {
+fn delete_user(email: &str) -> Result<(), String> {
     let conn = Connection::open(get_db_path())
     .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
     
@@ -1065,33 +1081,233 @@ fn delete_user(email: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Ob der Server HTTPS benutzen soll
+    #[clap(short, long)]
+    https: bool,
+    
+    /// Server-interne IP, auf der der Server erreichbar sein soll
+    #[clap(short, long, default_value = "127.0.0.1")]
+    ip: String,
+    
+    #[clap(subcommand)]
+    action: Option<ArgAction>,
+}
+
+#[derive(clap::Subcommand, Debug, PartialEq)]
+enum ArgAction {
+
+    /// Neuen Benutzer anlegen (--name, --email, --passwort, --rechte)
+    BenutzerNeu(BenutzerNeuArgs),
+    /// Benutzer löschen (--email)
+    BenutzerLoeschen(BenutzerLoeschenArgs),
+    
+    /// Neuen Grundbuchbezirk anlegen (--land, --amtsgericht, --bezirk)
+    BezirkNeu(BezirkNeuArgs),
+    /// Grundbuchbezirk löschen (--land, --amtsgericht, --bezirk)
+    BezirkLoeschen(BezirkLoeschenArgs),
+    
+    /// Neues Abonnement anlegen (--email, --aktenzeichen)
+    AboNeu(AboNeuArgs),
+    /// Abonnement löschen (--email, --aktenzeichen)
+    AboLoeschen(AboLoeschenArgs),
+}
+
+#[derive(Parser, Debug, PartialEq)]
+#[clap(author, version, about, long_about = None)]
+struct BenutzerNeuArgs {
+    
+    /// Name des neuen Benutzers
+    #[clap(short, long)]
+    name: String,
+    
+    /// E-Mail des neuen Benutzers
+    #[clap(short, long)]
+    email: String,
+    
+    /// Passwort des neuen Benutzers
+    #[clap(short, long)]
+    passwort: String,
+    
+    /// Rechte (Typ) des neuen Benutzers
+    #[clap(short, long, default_value = "gast")]
+    rechte: String,
+}
+
+#[derive(Parser, Debug, PartialEq)]
+#[clap(author, version, about, long_about = None)]
+struct BenutzerLoeschenArgs {
+
+    /// E-Mail des Benutzers, der gelöscht werden soll
+    #[clap(short, long)]
+    email: String,
+}
+
+#[derive(Parser, Debug, PartialEq)]
+#[clap(author, version, about, long_about = None)]
+struct BezirkNeuArgs {
+    
+    /// Name des Lands für den neuen Grundbuchbezirk
+    #[clap(short, long)]
+    land: String,
+    
+    /// Name des Amtsgerichts für den neuen Grundbuchbezirk
+    #[clap(short, long)]
+    amtsgericht: String,
+    
+    /// Name des neuen Grundbuchbezirks
+    #[clap(short, long)]
+    bezirk: String,
+}
+
+#[derive(Parser, Debug, PartialEq)]
+#[clap(author, version, about, long_about = None)]
+struct BezirkLoeschenArgs {
+    
+    /// Name des Lands des Grundbuchbezirks, der gelöscht werden soll
+    #[clap(short, long)]
+    land: String,
+    
+    /// Name des Amtsgerichts des Grundbuchbezirks, der gelöscht werden soll
+    #[clap(short, long)]
+    amtsgericht: String,
+    
+    /// Name des Grundbuchbezirks, der gelöscht werden soll
+    #[clap(short, long)]
+    bezirk: String,
+}
+
+#[derive(Parser, Debug, PartialEq)]
+#[clap(author, version, about, long_about = None)]
+struct AboNeuArgs {
+    /// Name des Amtsgerichts / Gemarkung / Blatts des neuen Abos, getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254 ")
+    #[clap(short, long)]
+    blatt: String,
+    
+    /// Name der E-Mail, für die das Abo eingetragen werden soll
+    #[clap(short, long)]
+    email: String,
+    
+    /// Aktenzeichen für das neue Abo
+    #[clap(short, long)]
+    aktenzeichen: String,
+}
+
+#[derive(Parser, Debug, PartialEq)]
+#[clap(author, version, about, long_about = None)]
+struct AboLoeschenArgs {
+    
+    /// Name des Amtsgerichts / Gemarkung / Blatts des Abos, getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254 ")
+    #[clap(short, long)]
+    blatt: String,
+    
+    /// Name der E-Mail, für die das Abo eingetragen ist
+    #[clap(short, long)]
+    email: String,
+    
+    /// Aktenzeichen des Abonnements
+    #[clap(short, long)]
+    aktenzeichen: String,
+}
+
+fn create_abo(blatt: &str, email: &str, aktenzeichen: &str) -> Result<(), String> {
+    
+    let blatt_split = blatt
+        .split("/")
+        .map(|s| s.trim().to_string())
+        .collect::<Vec<_>>();
+    
+    let amtsgericht = match blatt_split.get(0) {
+        Some(s) => s.trim().to_string(),
+        None => { return Err(format!("Kein Amtsgericht angegeben für Abonnement {blatt}")); },
+    };
+    
+    let bezirk = match blatt_split.get(1) {
+        Some(s) => s.trim().to_string(),
+        None => { return Err(format!("Kein Bezirk angegeben für Abonnement {blatt}")); },
+    };
+    
+    let b = match blatt_split.get(2) {
+        Some(s) => s.trim().parse::<i32>().map_err(|e| format!("Ungültige Blatt-Nr. {s}: {e}"))?,
+        None => { return Err(format!("Kein Blatt angegeben für Abonnement {blatt}")); },
+    };
+    
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    conn.execute(
+        "INSERT INTO abonnements (email, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![email, amtsgericht, bezirk, b, aktenzeichen],
+    ).map_err(|e| format!("Fehler beim Einfügen von {blatt} in Abonnements: {e}"))?;
+    
+    Ok(())
+}
+
+fn delete_abo(blatt: &str, email: &str, aktenzeichen: &str) -> Result<(), String> {
+    
+    let blatt_split = blatt
+        .split("/")
+        .map(|s| s.trim().to_string())
+        .collect::<Vec<_>>();
+    
+    let amtsgericht = match blatt_split.get(0) {
+        Some(s) => s.trim().to_string(),
+        None => { return Err(format!("Kein Amtsgericht angegeben für Abonnement {blatt}")); },
+    };
+    
+    let bezirk = match blatt_split.get(1) {
+        Some(s) => s.trim().to_string(),
+        None => { return Err(format!("Kein Bezirk angegeben für Abonnement {blatt}")); },
+    };
+    
+    let b = match blatt_split.get(2) {
+        Some(s) => s.trim().parse::<i32>().map_err(|e| format!("Ungültige Blatt-Nr. {s}: {e}"))?,
+        None => { return Err(format!("Kein Blatt angegeben für Abonnement {blatt}")); },
+    };
+    
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    conn.execute(
+        "DELETE FROM abonnements WHERE email = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND aktenzeichen = ?5",
+        params![email, amtsgericht, bezirk, b, aktenzeichen],
+    ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
+    
+    Ok(())
+}
+
+fn process_action(action: &ArgAction) -> Result<(), String> {
+    use self::ArgAction::*;
+    match action {
+        BenutzerNeu(BenutzerNeuArgs { name, email, passwort, rechte }) => create_user(name, email, passwort, rechte),
+        BenutzerLoeschen(BenutzerLoeschenArgs { email }) => delete_user(email),
+        BezirkNeu(BezirkNeuArgs { land, amtsgericht, bezirk}) => create_gemarkung(land, amtsgericht, bezirk),
+        BezirkLoeschen(BezirkLoeschenArgs { land, amtsgericht, bezirk }) => delete_gemarkung(land, amtsgericht, bezirk),
+        AboNeu(AboNeuArgs { blatt, email, aktenzeichen }) => create_abo(blatt, email, aktenzeichen),
+        AboLoeschen(AboLoeschenArgs { blatt, email, aktenzeichen }) => delete_abo(blatt, email, aktenzeichen),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
+    let args = Args::parse();
+    
     if let Err(e) = create_database() {
         println!("Fehler in create_database: {e}");
+        return Ok(());
     }
-    
-    if let Err(e) = create_user(
-        "Felix Schütt".to_string(), 
-        "Felix.Schuett@vlf-brandenburg.de".to_string(), 
-        "123456".to_string()
-    ) {
-        println!("Fehler in create_user: {e}");
-    }
-    
-    let pw = std::fs::read_to_string("./Felix.Schuett@vlf-brandenburg.de.pem").unwrap();
-    if let Err(e) = validate_user(
-        "Felix Schütt".to_string(), 
-        "Felix.Schuett@vlf-brandenburg.de".to_string(), 
-        "123456".to_string(),
-        pw,
-    ) {
-        println!("Fehler in validate_user: {e}");
-    }
-    
-    if let Err(e) = delete_user("Felix.Schuett@vlf-brandenburg.de".to_string()) {
-        println!("Fehler in delete_user: {e}");
+            
+    match args.action.as_ref() {
+        Some(s) => {
+            if let Err(e) = process_action(s) {
+                println!("{s:?}: {e}");
+            }
+            return Ok(());
+        },
+        None => { },
     }
     
     HttpServer::new(|| {
@@ -1106,7 +1322,7 @@ async fn main() -> std::io::Result<()> {
         .service(download)
         .service(upload)
     })
-    .bind(("127.0.0.1", 80))?
+    .bind((args.ip, if args.https { 443 } else { 80 }))?
     .run()
     .await
 }
