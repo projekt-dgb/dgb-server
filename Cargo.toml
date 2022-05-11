@@ -14,3 +14,11 @@ url_encoded_data = "0.6"
 sublime_fuzzy = "0.7.0"
 lazy_static = "1.4.0"
 regex = "1.5.5"
+git2 = "0.14.3"
+rand = "0.8.5"
+rsa = "0.6.1"
+pem-rfc7468 = "0.6.0"
+
+[dependencies.rusqlite]
+version = "0.27.0"
+features = ["bundled"]

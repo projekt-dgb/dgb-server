@@ -1,10 +1,12 @@
-use actix_web::{get, web, App, HttpServer, Responder, HttpResponse, HttpRequest};
+use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse, HttpRequest};
 use serde_derive::{Serialize, Deserialize};
 use url_encoded_data::UrlEncodedData;
 use std::collections::{BTreeMap, BTreeSet};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use rusqlite::{params, OpenFlags, Connection};
+use rsa::{RsaPrivateKey, pkcs1::LineEnding, PublicKey, pkcs8::{EncodePrivateKey, DecodePrivateKey}, RsaPublicKey, PaddingScheme};
 
 lazy_static! {
     static ref RE: Regex = Regex::new("(\\w*)\\s*(\\d*)").unwrap();
@@ -34,7 +36,7 @@ pub struct GrundbuchSucheOk {
     pub ergebnisse: Vec<GrundbuchSucheErgebnis>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]
 pub struct Titelblatt {
     pub amtsgericht: String,
     pub grundbuch_von: String,
@@ -58,39 +60,36 @@ pub struct GrundbuchSucheError {
 
 // --- SUCHE
 
-fn search_files(dir: &String, suchbegriff: &str) -> Result<Vec<GrundbuchSucheErgebnis>, std::io::Error> {
+fn search_files(dir: &PathBuf, suchbegriff: &str) -> Result<Vec<GrundbuchSucheErgebnis>, std::io::Error> {
 
     use std::fs;
 
     let mut ergebnisse = Vec::new();
-    
+        
     if let Some(s) = normalize_search(suchbegriff) {
-        if let Some(file) = 
-            fs::read_to_string(Path::new(dir).join(format!("{s}.gbx"))).ok()
+        if let Some(file) = fs::read_to_string(Path::new(dir).join(format!("{s}.gbx"))).ok()
             .and_then(|s| serde_json::from_str::<PdfFile>(&s).ok()) {
             
             ergebnisse.push(GrundbuchSucheErgebnis {
                 titelblatt: file.titelblatt.clone(),
                 ergebnis_text: "".to_string(),
                 gefunden_text: "".to_string(),
-                download_id: s.clone(),
+                download_id: format!("{}/{}/{}.gbx", file.titelblatt.amtsgericht, file.titelblatt.grundbuch_von, file.titelblatt.blatt),
                 score: isize::MAX,
             });
-            
-            return Ok(ergebnisse);
         }
     }
-        
+            
     for entry in fs::read_dir(dir)? {
         
         let entry = entry?;
         let path = entry.path();
         let metadata = fs::metadata(&path)?;
-        
+    
         if !metadata.is_file() {
             continue;
         }
-        
+    
         let file: Option<PdfFile> = 
             std::fs::read_to_string(&path).ok()
             .and_then(|s| serde_json::from_str(&s).ok());
@@ -101,23 +100,34 @@ fn search_files(dir: &String, suchbegriff: &str) -> Result<Vec<GrundbuchSucheErg
         };
         
         let grundbuch_json = serde_json::to_string_pretty(&pdf.analysiert).unwrap_or_default();
-        
-        match sublime_fuzzy::best_match(suchbegriff, &grundbuch_json) {
-            Some(m) => {
-                let score = m.score();
-                ergebnisse.push(GrundbuchSucheErgebnis {
-                    titelblatt: pdf.titelblatt.clone(),
-                    ergebnis_text: sublime_fuzzy::format_simple(&m, suchbegriff, "<strong>", "</strong>"),
-                    gefunden_text: "".to_string(),
-                    download_id: format!("{}_{}", pdf.titelblatt.grundbuch_von, pdf.titelblatt.blatt),
-                    score: score,
-                });
-            },
-            None => continue,
+        let lines = grundbuch_json.lines().collect::<Vec<_>>();
+                
+        for (i, line) in lines.iter().enumerate() {
+            match sublime_fuzzy::best_match(suchbegriff, &line) {
+                Some(m) => {
+                    let score = m.score();
+                    ergebnisse.push(GrundbuchSucheErgebnis {
+                        titelblatt: pdf.titelblatt.clone(),
+                        ergebnis_text: {
+                            let mut t = if i > 0 { format!("{}\r\n<br/>", lines.get(i - 1).cloned().unwrap_or_default()) } else { String::new() };
+                            t.push_str(&format!("{line}\r\n"));
+                            if let Some(next) = lines.get(i + 1) {
+                                t.push_str(&format!("<br/>{next}\r\n"));
+                            }
+                            t
+                        },
+                        gefunden_text: suchbegriff.to_string(),
+                        download_id: format!("{}/{}/{}.gbx", pdf.titelblatt.amtsgericht, pdf.titelblatt.grundbuch_von, pdf.titelblatt.blatt),
+                        score: score,
+                    });
+                    break;
+                },
+                None => continue,
+            }
         }
     }
-    
-    ergebnisse.sort_by(|a, b| a.score.cmp(&b.score));
+        
+    ergebnisse.sort_by(|a, b| b.score.cmp(&a.score));
     ergebnisse.dedup();
     
     Ok(ergebnisse.into_iter().take(50).collect())
@@ -125,13 +135,13 @@ fn search_files(dir: &String, suchbegriff: &str) -> Result<Vec<GrundbuchSucheErg
 
 
 fn normalize_search(text: &str) -> Option<String> {
-    if RE.is_match(text) {
-        let grundbuch_von = RE.find_iter(text).nth(1)?.as_str();
-        let blatt = RE.find_iter(text).nth(1).and_then(|s| s.as_str().parse::<usize>().ok())?;
+    if RE_2.is_match(text) {
+        let grundbuch_von = RE_2.captures_iter(text).nth(0).and_then(|cap| Some(cap.get(1)?.as_str().to_string()))?;
+        let blatt = RE_2.captures_iter(text).nth(0).and_then(|cap| Some(cap.get(2)?.as_str().parse::<usize>().ok()?))?;
         Some(format!("{grundbuch_von}_{blatt}"))
-    } else if RE_2.is_match(text) {
-        let grundbuch_von = RE_2.find_iter(text).nth(1)?.as_str();
-        let blatt = RE_2.find_iter(text).nth(1).and_then(|s| s.as_str().parse::<usize>().ok())?;
+    } else if RE.is_match(text) {
+        let grundbuch_von = RE.captures_iter(text).nth(0).and_then(|cap| Some(cap.get(1)?.as_str().to_string()))?;
+        let blatt = RE.captures_iter(text).nth(0).and_then(|cap| Some(cap.get(2)?.as_str().parse::<usize>().ok()?))?;
         Some(format!("{grundbuch_von}_{blatt}"))
     } else {
         None
@@ -149,23 +159,54 @@ async fn suche(suchbegriff: web::Path<String>, req: HttpRequest) -> impl Respond
         pkey: auth.get_first("pkey").map(|s| s.to_string()),
     };
 
-    let folder_path = std::env::current_exe().unwrap().join("grundbuchblaetter").to_str().unwrap_or_default().to_string();
+    let folder_path = std::env::current_exe().unwrap().parent().unwrap().join("data").to_str().unwrap_or_default().to_string();
 
+    let mut ergebnisse = Vec::new();
+    
+    // /data
+    if let Ok(e) = std::fs::read_dir(&folder_path) {
+        for entry in e {
+
+            let entry = match entry { Ok(o) => o, _ => continue, };
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+                
+            // /data/Prenzlau
+            if let Ok(e) = std::fs::read_dir(&path) {
+                for entry in e {
+                
+                    let entry = match entry { Ok(o) => o, _ => continue, };
+                    let path = entry.path();
+                    if !path.is_dir() { continue; }
+                    
+                    // /data/Prenzlau/Ludwigsburg
+                    if let Ok(mut e) = search_files(&path, &suchbegriff) {
+                        ergebnisse.append(&mut e);
+                    }
+                }   
+            }
+        }
+    }
+    
+    
     let json = serde_json::to_string_pretty(&GrundbuchSucheResponse::StatusOk(GrundbuchSucheOk {
-        ergebnisse: search_files(&folder_path, &*suchbegriff).unwrap_or_default(),
+            ergebnisse,
     })).unwrap_or_default();
     
-    HttpResponse::Ok().body(json)
+    HttpResponse::Ok()
+    .content_type("application/json")
+    .body(json)
 }
 
 // --- DOWNLOAD
 
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
+#[serde(tag = "status")]
 pub enum PdfFileOrEmpty {
+    #[serde(rename = "ok")]
     Pdf(PdfFile),
-    #[serde(rename = "grundbuchNichtInDatenbankVorhanden")]
+    #[serde(rename = "error")]
     NichtVorhanden,
 }
 
@@ -183,7 +224,9 @@ pub struct PdfFile {
     geladen: BTreeMap<u32, SeiteParsed>,
     analysiert: Grundbuch,
     pdftotext_layout: PdfToTextLayout,
-
+    #[serde(skip, default)]
+    icon: Option<PdfFileIcon>,
+    
     /// Seitennummern von Seiten, die versucht wurden, geladen zu werden
     #[serde(default)]
     seiten_versucht_geladen: BTreeSet<u32>,
@@ -197,6 +240,16 @@ pub struct PdfFile {
     nebenbeteiligte_dateipfade: Vec<String>,
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+pub enum PdfFileIcon {
+    // Gelbes Warn-Icon
+    HatFehler,
+    // Halb-grünes Icon
+    KeineOrdnungsnummernZugewiesen,
+    // Voll-grünes Icon
+    AllesOkay,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SeiteParsed {
     pub typ: SeitenTyp,
@@ -207,6 +260,7 @@ pub struct SeiteParsed {
 pub struct Grundbuch {
     pub titelblatt: Titelblatt,
     pub bestandsverzeichnis: Bestandsverzeichnis,
+    #[serde(default)]
     pub abt1: Abteilung1,
     pub abt2: Abteilung2,
     pub abt3: Abteilung3,
@@ -250,6 +304,21 @@ impl Default for StringOrLines {
     }
 }
 
+// Eintrag für ein grundstücksgleiches Recht
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct BvEintragRecht {
+    pub lfd_nr: usize,
+    pub zu_nr: StringOrLines,
+    pub bisherige_lfd_nr: Option<usize>,
+    pub text: StringOrLines,
+    #[serde(default)]
+    pub automatisch_geroetet: Option<bool>,
+    #[serde(default)]
+    pub manuell_geroetet: Option<bool>,
+    #[serde(default)]
+    pub position_in_pdf: Option<PositionInPdf>,
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct BvEintragFlurstueck {
     pub lfd_nr: usize,
@@ -260,20 +329,6 @@ pub struct BvEintragFlurstueck {
     pub gemarkung: Option<String>,
     pub bezeichnung: Option<StringOrLines>,
     pub groesse: FlurstueckGroesse,
-    #[serde(default)]
-    pub automatisch_geroetet: Option<bool>,
-    #[serde(default)]
-    pub manuell_geroetet: Option<bool>,
-    #[serde(default)]
-    pub position_in_pdf: Option<PositionInPdf>,
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub struct BvEintragRecht {
-    pub lfd_nr: usize,
-    pub zu_nr: StringOrLines,
-    pub bisherige_lfd_nr: Option<usize>,
-    pub text: StringOrLines,
     #[serde(default)]
     pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
@@ -335,13 +390,40 @@ pub struct Abteilung1 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Abt1Eintrag {
+#[serde(untagged)]
+#[repr(C)]
+pub enum Abt1Eintrag {
+    V1(Abt1EintragV1),
+    V2(Abt1EintragV2),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Abt1EintragV2 {
     // lfd. Nr. der Eintragung
     pub lfd_nr: usize,
     // Rechtstext
     pub eigentuemer: StringOrLines,
     // Used to distinguish from Abt1EintragV1
     pub version: usize,
+    #[serde(default)]
+    pub automatisch_geroetet: bool,
+    #[serde(default)]
+    pub manuell_geroetet: Option<bool>,
+    #[serde(default)]
+    pub position_in_pdf: Option<PositionInPdf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Abt1EintragV1 {
+    // lfd. Nr. der Eintragung
+    pub lfd_nr: usize,
+    // Rechtstext
+    pub eigentuemer: StringOrLines,
+    // lfd. Nr der betroffenen Grundstücke im Bestandsverzeichnis
+    pub bv_nr: StringOrLines, 
+    // Vec<BvNr>,
+    pub grundlage_der_eintragung: StringOrLines,
+    
     #[serde(default)]
     pub automatisch_geroetet: bool,
     #[serde(default)]
@@ -582,8 +664,8 @@ pub struct PdfToTextSeite {
     pub texte: Vec<Textblock>,
 }
 
-#[get("/download/{download_id}")]
-async fn download(download_id: web::Path<String>, req: HttpRequest) -> impl Responder {
+#[get("/download/{amtsgericht}/{grundbuch_von}/{blatt}.gbx")]
+async fn download(path: web::Path<(String, String, usize)>, req: HttpRequest) -> impl Responder {
     
     let auth = UrlEncodedData::parse_str(req.query_string());
     let auth = AuthFormData {
@@ -593,26 +675,436 @@ async fn download(download_id: web::Path<String>, req: HttpRequest) -> impl Resp
         pkey: auth.get_first("pkey").map(|s| s.to_string()),
     };
 
-    let folder_path = std::env::current_exe().unwrap().join("grundbuchblaetter");
-    let file_id = format!("{download_id}.gbx");
-    let file_path = folder_path.join(file_id);
-    let file: Option<PdfFile> = std::fs::read_to_string(&file_path).ok().and_then(|s| serde_json::from_str(&s).ok());
+    let folder_path = std::env::current_exe().unwrap().parent().unwrap().join("data");
+    let (amtsgericht, grundbuch_von, blatt) = &*path;
     
+    let file: Option<PdfFile> = if amtsgericht == "*" {
+        
+        let mut result_file_path = None;
+        if let Some(s) = std::fs::read_dir(&folder_path).ok() {
+            for entry in s {
+                
+                let entry = match entry.ok() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                
+                let path = entry.path();
+                let metadata = match std::fs::metadata(&path).ok() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                
+                if !metadata.is_dir() {
+                    continue;
+                }
+                
+                if path.ends_with(&grundbuch_von) {
+                    result_file_path = Some(path.to_path_buf());
+                    break;
+                }
+            }
+        }
+    
+        result_file_path.as_ref().and_then(|fp| {
+            let file_path = fp.join(&format!("{grundbuch_von}_{blatt}.gbx"));
+            std::fs::read_to_string(&file_path).ok().and_then(|s| serde_json::from_str(&s).ok()) 
+        })
+        
+    } else {
+        let file_path = folder_path.join(amtsgericht).join(grundbuch_von).join(&format!("{grundbuch_von}_{blatt}.gbx"));
+        std::fs::read_to_string(&file_path).ok().and_then(|s| serde_json::from_str(&s).ok()) 
+    };
+
     let response_json = match file {
         Some(s) => PdfFileOrEmpty::Pdf(s),
         None => PdfFileOrEmpty::NichtVorhanden,
     };
     
     HttpResponse::Ok()
+    .content_type("application/json")
     .body(serde_json::to_string_pretty(&response_json).unwrap_or_default())
 }
 
-#[actix_web::main] // or #[tokio::main]
+// --- UPLOAD
+
+pub type FileName = String;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadChangeset {
+    pub aenderung_titel: String,
+    pub aenderung_beschreibung: String,
+    pub neue_dateien: BTreeMap<FileName, PdfFile>,
+    pub geaenderte_dateien: BTreeMap<FileName, GbxAenderung>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GbxAenderung {
+    pub alt: PdfFile,
+    pub neu: PdfFile,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UploadChangesetResponse {
+    StatusOk(UploadChangesetResponseOk),
+    StatusError(UploadChangesetResponseError),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadChangesetResponseOk {
+    pub neu: BTreeMap<FileName, PdfFile>,
+    pub geaendert: BTreeMap<FileName, PdfFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadChangesetResponseError {
+    pub code: isize,
+    pub text: String,
+}
+
+#[post("/upload")]
+async fn upload(upload_changeset: web::Json<UploadChangeset>, req: HttpRequest) -> impl Responder {
+    
+    let auth = UrlEncodedData::parse_str(req.query_string());
+    let auth = AuthFormData {
+        benutzer: auth.get_first("benutzer").map(|s| s.to_string()).unwrap(),
+        email: auth.get_first("email").map(|s| s.to_string()).unwrap(),
+        passwort: auth.get_first("passwort").map(|s| s.to_string()).unwrap(),
+        pkey: auth.get_first("pkey").map(|s| s.to_string()),
+    };
+    
+    let folder_path = std::env::current_exe().unwrap().parent().unwrap().join("data");
+    
+    if !folder_path.exists() {
+        let _ = std::fs::create_dir(folder_path.clone());
+    }
+    
+    let mut check = UploadChangesetResponseOk {
+        neu: BTreeMap::new(),
+        geaendert: BTreeMap::new(),
+    };
+
+    for (name, neu) in upload_changeset.neue_dateien.iter() {
+        
+        let amtsgericht = &neu.titelblatt.amtsgericht;
+        let grundbuch = &neu.titelblatt.grundbuch_von;
+        let blatt = neu.titelblatt.blatt;
+        let target_path = folder_path.clone().join(amtsgericht).join(grundbuch).join(&format!("{grundbuch}_{blatt}.gbx"));
+        let target_json = serde_json::to_string_pretty(&neu).unwrap_or_default();
+        let target_folder = folder_path.clone().join(amtsgericht).join(grundbuch);
+
+        let _ = std::fs::create_dir_all(&target_folder);
+        let _ = std::fs::write(target_path, target_json.as_bytes());
+        
+        check.neu.insert(name.clone(), neu.clone());
+    }
+    
+    for (name, geaendert) in upload_changeset.geaenderte_dateien.iter() {
+        
+        let amtsgericht = &geaendert.neu.titelblatt.amtsgericht;
+        let grundbuch = &geaendert.neu.titelblatt.grundbuch_von;
+        let blatt = geaendert.neu.titelblatt.blatt;
+        let target_path = folder_path.clone().join(amtsgericht).join(grundbuch).join(&format!("{grundbuch}_{blatt}.gbx"));
+        let target_json = serde_json::to_string_pretty(&geaendert.neu).unwrap_or_default();
+        let target_folder = folder_path.clone().join(amtsgericht).join(grundbuch);
+
+        let _ = std::fs::create_dir_all(&target_folder);
+        let _ = std::fs::write(target_path, target_json.as_bytes());
+        
+        check.geaendert.insert(name.clone(), geaendert.neu.clone());
+    }
+    
+    if !check.geaendert.is_empty() ||
+       !check.neu.is_empty() {
+        
+        use git2::Repository;
+
+        let repo = match Repository::open(&folder_path) {
+            Ok(repo) => repo,
+            Err(_) => {
+                match Repository::init(&folder_path) {
+                    Ok(repo) => repo,
+                    Err(e) => {
+                        return HttpResponse::Ok()
+                        .content_type("application/json")
+                        .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                            code: 1,
+                            text: format!("Konnte Änderungstext nicht speichern"),
+                        })).unwrap_or_default());
+                    },
+                }
+            },
+        };
+        
+        let mut index = match repo.index() {
+            Ok(o) => o,
+            Err(e) => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                    code: 2,
+                    text: format!("Konnte Änderungstext nicht speichern"),
+                })).unwrap_or_default());
+            }
+        };
+        
+        let _ = index.add_all(["*.gbx"].iter(), git2::IndexAddOption::DEFAULT, None);
+        let _ = index.write();
+        
+        let signature = match git2::Signature::now(&auth.benutzer, &auth.email) {
+            Ok(o) => o,
+            Err(e) => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                    code: 4,
+                    text: format!("Konnte Änderungstext nicht speichern"),
+                })).unwrap_or_default());
+            }
+        };
+        
+        let msg = format!("{}\r\n\r\n{}", upload_changeset.aenderung_titel.trim(), upload_changeset.aenderung_beschreibung);
+        
+        let id = match index.write_tree() {
+            Ok(o) => o,
+            Err(e) => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                    code: 5,
+                    text: format!("Konnte Änderungstext nicht speichern"),
+                })).unwrap_or_default());
+            }
+        };
+        
+        let tree = match repo.find_tree(id) {
+            Ok(o) => o,
+            Err(e) => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                    code: 6,
+                    text: format!("Konnte Änderungstext nicht speichern"),
+                })).unwrap_or_default());
+            }
+        };
+        
+        
+        let parent = repo.head().ok()
+            .and_then(|c| c.target())
+            .and_then(|head_target| repo.find_commit(head_target).ok());
+        
+        let parents = match parent.as_ref() {
+            Some(s) => vec![s],
+            None => Vec::new(),
+        };
+        
+        let commit = match repo.commit(
+            Some("HEAD"), 
+            &signature, 
+            &signature, 
+            &msg, 
+            &tree,
+            &parents,
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(UploadChangesetResponseError {
+                    code: 9,
+                    text: format!("Konnte Änderungstext nicht speichern"),
+                })).unwrap_or_default());
+            }
+        };
+    }
+    
+    HttpResponse::Ok()
+    .content_type("application/json")
+    .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusOk(check)).unwrap_or_default())
+}
+
+fn get_db_path() -> String {
+    std::env::current_exe().unwrap()
+    .parent().unwrap()
+    .join("benutzer.sqlite.db").to_str()
+    .unwrap_or_default().to_string()
+}
+
+fn create_database() -> Result<(), rusqlite::Error> {
+
+    let mut open_flags = OpenFlags::empty();
+
+    open_flags.set(OpenFlags::SQLITE_OPEN_CREATE, true);
+    open_flags.set(OpenFlags::SQLITE_OPEN_FULL_MUTEX, true);
+    open_flags.set(OpenFlags::SQLITE_OPEN_NOFOLLOW, true);
+    open_flags.set(OpenFlags::SQLITE_OPEN_SHARED_CACHE, true);
+    open_flags.set(OpenFlags::SQLITE_OPEN_READ_WRITE, true);
+            
+    let conn = Connection::open_with_flags(get_db_path(), open_flags)?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS benutzer (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                email           VARCHAR(255) UNIQUE NOT NULL,
+                name            VARCHAR(255) NOT NULL,
+                password_hashed BLOB NOT NULL
+        )",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS bezirke (
+            land            VARCHAR(255) NOT NULL,
+            amtsgericht     VARCHAR(255) NOT NULL,
+            gemarkung       VARCHAR(255) NOT NULL
+        )",
+        [],
+    )?;
+    
+    Ok(())
+}
+
+fn create_gemarkung(land: String, amtsgericht: String, gemarkung: String) -> Result<(), rusqlite::Error> {
+
+    let conn = Connection::open(get_db_path())?;
+
+    conn.execute(
+        "INSERT INTO bezirke (land, amtsgericht, gemarkung) VALUES (?1, ?2, ?3) ON CONFLICT DO UPDATE",
+        params![land, amtsgericht, gemarkung],
+    )?;
+    
+    Ok(())
+}
+
+fn delete_gemarkung(land: String, amtsgericht: String, gemarkung: String) -> Result<(), rusqlite::Error> {
+
+    let conn = Connection::open(get_db_path())?;
+
+    conn.execute(
+        "DELET FROM bezirke WHERE land = ?1 AND amtsgericht = ?2 AND gemarkung = ?3",
+        params![land, amtsgericht, gemarkung],
+    )?;
+    
+    Ok(())
+}
+
+fn create_user(name: String, email: String, passwort: String) -> Result<(), String> {
+
+    let mut rng = rand::thread_rng();
+    let bits = 2048;
+
+    let private_key = RsaPrivateKey::new(&mut rng, bits)
+    .map_err(|e| format!("Fehler in RsaPrivateKey::new: {e}"))?;
+    
+    let public_key = RsaPublicKey::from(&private_key);
+    
+    if passwort.len() > 50 {
+        return Err(format!("Passwort zu lang"));
+    }
+    
+    let password_hashed = public_key
+        .encrypt(&mut rng, PaddingScheme::new_pkcs1v15_encrypt(), passwort.as_bytes())
+        .map_err(|e| format!("Konnte Passwort nicht verschlüsseln: {e}"))?;
+
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    private_key.write_pkcs8_pem_file(format!("./{email}.pem"), LineEnding::CRLF)
+    .map_err(|e| format!("Fehler beim Schreiben von {email}.pem: {e}"))?;
+    
+    conn.execute(
+        "INSERT INTO benutzer (email, name, password_hashed) VALUES (?1, ?2, ?3)",
+        params![email, name, password_hashed],
+    ).map_err(|e| format!("Fehler beim Einfügen von {email} in Datenbank: {e}"))?;
+    
+    Ok(())
+}
+
+fn validate_user(name: String, email: String, passwort: String, private_key: String) -> Result<i32, String> {
+
+    let private_key = RsaPrivateKey::from_pkcs8_pem(&private_key)
+    .map_err(|e| format!("Ungültiger privater Schlüssel"))?;
+    
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    let mut stmt = conn.prepare(
+        "SELECT id, password_hashed FROM benutzer WHERE email = ?1 AND name = ?2"
+    ).map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        
+    let benutzer = stmt.query_map(params![email, name], |row| { Ok((row.get::<usize, i32>(0)?, row.get::<usize, Vec<u8>>(1)?)) })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .collect::<Vec<_>>();
+    
+    let (id, pw) = match benutzer.get(0) {
+        Some(Ok((id, pw))) => (id, pw),
+        _ => return Err(format!("Kein Benutzer für \"{name} <{email}>\" gefunden")),
+    };
+    
+    let passwort_decrypted = private_key.decrypt(PaddingScheme::new_pkcs1v15_encrypt(), pw.as_ref())
+        .map_err(|e| format!("Passwort falsch: Privater Schlüssel ungültig für {email}"))?;
+    
+    let passwort_decrypted = String::from_utf8(passwort_decrypted)
+        .map_err(|e| format!("Konnte Passwort nicht entschlüsseln"))?;
+        
+    if passwort_decrypted != passwort {
+        return Err(format!("Ungültiges Passwort"));
+    }
+    
+    Ok(*id)
+}
+
+fn delete_user(email: String) -> Result<(), String> {
+    let conn = Connection::open(get_db_path())
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    conn.execute("DELETE FROM benutzer WHERE email = ?1", params![email])
+    .map_err(|e| format!("Fehler beim Löschen von {email}: {e}"))?;
+    
+    Ok(())
+}
+
+#[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    if let Err(e) = create_database() {
+        println!("Fehler in create_database: {e}");
+    }
+    
+    if let Err(e) = create_user(
+        "Felix Schütt".to_string(), 
+        "Felix.Schuett@vlf-brandenburg.de".to_string(), 
+        "123456".to_string()
+    ) {
+        println!("Fehler in create_user: {e}");
+    }
+    
+    let pw = std::fs::read_to_string("./Felix.Schuett@vlf-brandenburg.de.pem").unwrap();
+    if let Err(e) = validate_user(
+        "Felix Schütt".to_string(), 
+        "Felix.Schuett@vlf-brandenburg.de".to_string(), 
+        "123456".to_string(),
+        pw,
+    ) {
+        println!("Fehler in validate_user: {e}");
+    }
+    
+    if let Err(e) = delete_user("Felix.Schuett@vlf-brandenburg.de".to_string()) {
+        println!("Fehler in delete_user: {e}");
+    }
+    
     HttpServer::new(|| {
+
+        let json_cfg = web::JsonConfig::default()
+        .limit(usize::MAX)
+        .content_type_required(false);
+        
         App::new()
+        .app_data(json_cfg)
         .service(suche)
         .service(download)
+        .service(upload)
     })
     .bind(("127.0.0.1", 80))?
     .run()
