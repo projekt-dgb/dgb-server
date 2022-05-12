@@ -477,3 +477,12 @@ pub struct AuthFormData {
     #[serde(default)]
     pub pkey: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BenutzerInfo {
+    pub id: i32,
+    pub rechte: String,
+    pub name: String,
+    pub email: String,
+}
+

@@ -1,20 +1,28 @@
 /// API für `/upload` Anfragen
 pub mod upload {
 
-    use crate::models::{AuthFormData, PdfFile};
+    use crate::models::{AuthFormData, PdfFile, BenutzerInfo};
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
     use std::collections::BTreeMap;
     use url_encoded_data::UrlEncodedData;
-
+    use std::path::PathBuf;
+    
     pub type FileName = String;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct UploadChangeset {
-        pub aenderung_titel: String,
-        pub aenderung_beschreibung: String,
-        pub neue_dateien: BTreeMap<FileName, PdfFile>,
-        pub geaenderte_dateien: BTreeMap<FileName, GbxAenderung>,
+        pub titel: String,
+        pub beschreibung: Vec<String>,
+        pub fingerprint: String,
+        pub signatur: Vec<String>,
+        pub data: UploadChangesetData,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct UploadChangesetData {
+        pub neu: Vec<PdfFile>,
+        pub geaendert: Vec<GbxAenderung>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,8 +42,8 @@ pub mod upload {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct UploadChangesetResponseOk {
-        pub neu: BTreeMap<FileName, PdfFile>,
-        pub geaendert: BTreeMap<FileName, PdfFile>,
+        pub neu: Vec<PdfFile>,
+        pub geaendert: Vec<PdfFile>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +58,7 @@ pub mod upload {
         req: HttpRequest,
     ) -> impl Responder {
         
+        let upload_changeset = &*upload_changeset;
         let benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
             Err(e) => {
@@ -78,37 +87,42 @@ pub mod upload {
         }
 
         let mut check = UploadChangesetResponseOk {
-            neu: BTreeMap::new(),
-            geaendert: BTreeMap::new(),
+            neu: Vec::new(),
+            geaendert: Vec::new(),
         };
 
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
 
-        for (name, neu) in upload_changeset.neue_dateien.iter() {
+        for neu in upload_changeset.data.neu.iter() {
+        
             let amtsgericht = &neu.titelblatt.amtsgericht;
             let grundbuch = &neu.titelblatt.grundbuch_von;
-
-            if !gemarkungen
-                .iter()
-                .any(|(land, ag, bezirk)| ag == amtsgericht && bezirk == grundbuch)
-            {
-                return HttpResponse::Ok().content_type("application/json").body(
-                    serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                        UploadChangesetResponseError {
-                            code: 1,
-                            text: format!(
-                                "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
-                                amtsgericht, grundbuch
-                            ),
-                        },
-                    ))
-                    .unwrap_or_default(),
-                );
-            }
+            let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
+                if ag == amtsgericht && bezirk == grundbuch { Some(land.clone()) } else { None }
+            });
+            
+            let land = match land {
+                None => {
+                    return HttpResponse::Ok().content_type("application/json").body(
+                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                            UploadChangesetResponseError {
+                                code: 1,
+                                text: format!(
+                                    "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
+                                    amtsgericht, grundbuch
+                                ),
+                            },
+                        ))
+                        .unwrap_or_default(),
+                    );
+                },
+                Some(s) => s,
+            };
 
             let blatt = neu.titelblatt.blatt;
             let target_path = folder_path
                 .clone()
+                .join(land)
                 .join(amtsgericht)
                 .join(grundbuch)
                 .join(&format!("{grundbuch}_{blatt}.gbx"));
@@ -119,169 +133,215 @@ pub mod upload {
             let _ = std::fs::create_dir_all(&target_folder);
             let _ = std::fs::write(target_path, target_json.as_bytes());
 
-            check.neu.insert(name.clone(), neu.clone());
+            check.neu.push(neu.clone());
         }
 
-        for (name, geaendert) in upload_changeset.geaenderte_dateien.iter() {
+        for geaendert in upload_changeset.data.geaendert.iter() {
             
             let amtsgericht = &geaendert.neu.titelblatt.amtsgericht;
             let grundbuch = &geaendert.neu.titelblatt.grundbuch_von;
 
-            if !gemarkungen
-                .iter()
-                .any(|(land, ag, bezirk)| ag == amtsgericht && bezirk == grundbuch)
-            {
-                return HttpResponse::Ok().content_type("application/json").body(
-                    serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                        UploadChangesetResponseError {
-                            code: 1,
-                            text: format!(
-                                "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
-                                amtsgericht, grundbuch
-                            ),
-                        },
-                    ))
-                    .unwrap_or_default(),
-                );
-            }
+            let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
+                if ag == amtsgericht && bezirk == grundbuch { Some(land.clone()) } else { None }
+            });
+            
+            let land = match land {
+                None => {
+                    return HttpResponse::Ok().content_type("application/json").body(
+                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                            UploadChangesetResponseError {
+                                code: 1,
+                                text: format!(
+                                    "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
+                                    amtsgericht, grundbuch
+                                ),
+                            },
+                        ))
+                        .unwrap_or_default(),
+                    );
+                },
+                Some(s) => s,
+            };
 
             let blatt = geaendert.neu.titelblatt.blatt;
             let target_path = folder_path
                 .clone()
+                .join(land)
                 .join(amtsgericht)
                 .join(grundbuch)
                 .join(&format!("{grundbuch}_{blatt}.gbx"));
+            
             let target_json = serde_json::to_string_pretty(&geaendert.neu).unwrap_or_default();
             let target_folder = folder_path.clone().join(amtsgericht).join(grundbuch);
 
             let _ = std::fs::create_dir_all(&target_folder);
             let _ = std::fs::write(target_path, target_json.as_bytes());
 
-            check.geaendert.insert(name.clone(), geaendert.neu.clone());
+            check.geaendert.push(geaendert.neu.clone());
+        }
+
+        if let Err(e) = verify_signature(
+            &benutzer.name,
+            &benutzer.email,
+            &upload_changeset.fingerprint,
+            &upload_changeset.titel,
+            &upload_changeset.beschreibung,
+            &upload_changeset.data, 
+            &upload_changeset.signatur,
+        ) {
+            return HttpResponse::Ok().content_type("application/json").body(
+                serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                    UploadChangesetResponseError {
+                        code: 500,
+                        text: format!("Fehler bei Überprüfung der digitalen Signatur: {e}"),
+                    },
+                ))
+                .unwrap_or_default(),
+            );
         }
 
         if !check.geaendert.is_empty() || !check.neu.is_empty() {
-            use git2::Repository;
-
-            let repo = match Repository::open(&folder_path) {
-                Ok(repo) => repo,
-                Err(_) => match Repository::init(&folder_path) {
-                    Ok(repo) => repo,
-                    Err(e) => {
-                        return HttpResponse::Ok().content_type("application/json").body(
-                            serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                                UploadChangesetResponseError {
-                                    code: 1,
-                                    text: format!("Konnte Änderungstext nicht speichern"),
-                                },
-                            ))
-                            .unwrap_or_default(),
-                        );
-                    }
-                },
-            };
-
-            let mut index = match repo.index() {
-                Ok(o) => o,
-                Err(e) => {
-                    return HttpResponse::Ok().content_type("application/json").body(
-                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                            UploadChangesetResponseError {
-                                code: 2,
-                                text: format!("Konnte Änderungstext nicht speichern"),
-                            },
-                        ))
-                        .unwrap_or_default(),
-                    );
-                }
-            };
-
-            let _ = index.add_all(["*.gbx"].iter(), git2::IndexAddOption::DEFAULT, None);
-            let _ = index.write();
-
-            let signature = match git2::Signature::now(&benutzer.name, &benutzer.email) {
-                Ok(o) => o,
-                Err(e) => {
-                    return HttpResponse::Ok().content_type("application/json").body(
-                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                            UploadChangesetResponseError {
-                                code: 4,
-                                text: format!("Konnte Änderungstext nicht speichern"),
-                            },
-                        ))
-                        .unwrap_or_default(),
-                    );
-                }
-            };
-
-            let msg = format!(
-                "{}\r\n\r\n{}",
-                upload_changeset.aenderung_titel.trim(),
-                upload_changeset.aenderung_beschreibung
-            );
-
-            let id = match index.write_tree() {
-                Ok(o) => o,
-                Err(e) => {
-                    return HttpResponse::Ok().content_type("application/json").body(
-                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                            UploadChangesetResponseError {
-                                code: 5,
-                                text: format!("Konnte Änderungstext nicht speichern"),
-                            },
-                        ))
-                        .unwrap_or_default(),
-                    );
-                }
-            };
-
-            let tree = match repo.find_tree(id) {
-                Ok(o) => o,
-                Err(e) => {
-                    return HttpResponse::Ok().content_type("application/json").body(
-                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                            UploadChangesetResponseError {
-                                code: 6,
-                                text: format!("Konnte Änderungstext nicht speichern"),
-                            },
-                        ))
-                        .unwrap_or_default(),
-                    );
-                }
-            };
-
-            let parent = repo
-                .head()
-                .ok()
-                .and_then(|c| c.target())
-                .and_then(|head_target| repo.find_commit(head_target).ok());
-
-            let parents = match parent.as_ref() {
-                Some(s) => vec![s],
-                None => Vec::new(),
-            };
-
-            let commit =
-                match repo.commit(Some("HEAD"), &signature, &signature, &msg, &tree, &parents) {
-                    Ok(o) => o,
-                    Err(e) => {
-                        return HttpResponse::Ok().content_type("application/json").body(
-                            serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                                UploadChangesetResponseError {
-                                    code: 9,
-                                    text: format!("Konnte Änderungstext nicht speichern"),
-                                },
-                            ))
-                            .unwrap_or_default(),
-                        );
-                    }
-                };
+            if let Err(e) = commit_changes(&folder_path, &benutzer, &upload_changeset) {
+                return HttpResponse::Ok().content_type("application/json").body(
+                    serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                        UploadChangesetResponseError {
+                            code: e as isize,
+                            text: format!("Konnte Änderungstext nicht speichern"),
+                        },
+                    ))
+                    .unwrap_or_default(),
+                );
+            }
         }
 
         HttpResponse::Ok().content_type("application/json").body(
             serde_json::to_string_pretty(&UploadChangesetResponse::StatusOk(check))
                 .unwrap_or_default(),
         )
+    }
+    
+    fn verify_signature(
+        name: &str,
+        email: &str,
+        fingerprint: &str,
+        titel: &str,
+        beschreibung: &[String],
+        data: &UploadChangesetData,
+        signature: &[String],
+    ) -> Result<bool, String> {
+        
+        Ok(true)
+        
+    /*
+        let text_signed = create_text(
+            name: &str,
+            email: &str,
+            fingerprint: &str,
+            beschreibung_titel: &str,
+            beschreibung_no_key: &[String],
+            data: &UploadChangesetData,
+        );
+    */  
+
+        // let data = ; 
+        // from_bytes(bytes: impl AsRef<[u8]>) -> Result<Data<'static>>
+    }
+    
+    fn commit_header_no_signature(
+        commit_titel: &str,
+        commit_beschreibung: &[String],
+        fingerprint: &str,
+    ) -> String {
+        let mut target = String::new();
+        target.push_str(commit_titel);
+        target.push_str("\r\n");
+        target.push_str(&commit_beschreibung.to_vec().join("\r\n"));
+        target.push_str("\r\n");
+        target.push_str(fingerprint);
+        target.push_str("\r\n");
+        target
+    }
+    
+    fn commit_header_with_signature(
+        commit_titel: &str,
+        commit_beschreibung: &[String],
+        fingerprint: &str,
+        signature: &[String],
+    ) -> String {
+        let mut no_sig = commit_header_no_signature(commit_titel, commit_beschreibung, fingerprint);
+        no_sig.push_str("\r\n");
+        no_sig.push_str(&signature.to_vec().join("\r\n"));
+        no_sig
+    }
+    
+    fn create_text(
+        commit_titel: &str,
+        commit_beschreibung: &[String],
+        fingerprint: &str,
+        data: &UploadChangesetData,
+    ) -> String {
+    
+        let mut target = String::new();
+        
+        target.push_str(&commit_header_no_signature(
+            commit_titel,
+            commit_beschreibung,
+            fingerprint,
+        ));
+        
+        target.push_str("\r\n");
+        
+        let json = serde_json::to_string_pretty(&data)
+            .unwrap_or_default()
+            .lines()
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        
+        target.push_str(&json);
+        
+        target
+    }
+    
+    fn commit_changes(folder_path: &PathBuf, benutzer: &BenutzerInfo, upload_changeset: &UploadChangeset) -> Result<(), i32> {
+        use git2::Repository;
+
+        let repo = match Repository::open(&folder_path) {
+            Ok(o) => o,
+            Err(_) => { Repository::init(&folder_path).map_err(|_| 1)? },
+        };
+
+        let mut index = repo.index().map_err(|_| 2)?;
+        let _ = index.add_all(["*.gbx"].iter(), git2::IndexAddOption::DEFAULT, None);
+        let _ = index.write();
+
+        let signature = git2::Signature::now(&benutzer.name, &benutzer.email).map_err(|_| 3)?;
+
+        let msg = commit_header_with_signature(
+            upload_changeset.titel.trim(),
+            upload_changeset.beschreibung.as_ref(),
+            upload_changeset.fingerprint.as_str(),
+            upload_changeset.signatur.as_ref(),
+        );
+        
+        let id = index.write_tree().map_err(|_| 4)?;
+        let tree = repo.find_tree(id).map_err(|_| 5)?;
+
+        let parent = repo
+            .head()
+            .ok()
+            .and_then(|c| c.target())
+            .and_then(|head_target| repo.find_commit(head_target).ok());
+
+        let parents = match parent.as_ref() {
+            Some(s) => vec![s],
+            None => Vec::new(),
+        };
+
+        let commit = repo
+            .commit(Some("HEAD"), &signature, &signature, &msg, &tree, &parents)
+            .map_err(|_| 6)?;
+        
+        Ok(())
     }
 }
 

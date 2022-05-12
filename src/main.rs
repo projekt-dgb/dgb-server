@@ -14,8 +14,13 @@
 //! - `/download/pdf/{land}/{amtsgericht}/{grundbuchbezirk}/{blattnr}?email={email}&passwort={passwort}`
 //!   - Gibt den momentanen Stand des jetzigen Grundbuchs als .pdf-Datei aus
 //!
-//! - `/upload?email={email}&passwort={passwort}&pkey={pkey}`
-//!     - Anfrage`: .gbx-Datei
+//! - `/abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blattnur}/{tag}?email={email}&passwort={passwort}`
+//!   - Erstellt ein neues E-Mail Abonnement für den Benutzer
+//!
+//! - `/abo-neu/webhook/{amtsgericht}/{grundbuchbezirk}/{blattnur}/{tag}?email={email}&passwort={passwort}`
+//!   - Erstellt ein neues Webhook-Abonnement für den Benutzer
+//!`
+//! - POST `/upload?email={email}&passwort={passwort}`
 //!
 //! # CLI
 //!
@@ -40,12 +45,17 @@
 //!
 //! - `abo-loeschen`: Löscht das angegebene Abonnement.
 
+//
+// sudo apt install -y libgpgme-dev libgpg-error-dev
+//
+
 use actix_web::{web::JsonConfig, App, HttpServer};
 use clap::Parser;
 
 pub mod api;
 pub mod db;
 pub mod models;
+pub mod pgp;
 
 /*
 pub mod pdf;

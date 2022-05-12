@@ -5,6 +5,7 @@ use rsa::{
     PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey,
 };
 use rusqlite::{Connection, OpenFlags};
+use crate::models::BenutzerInfo;
 
 pub static DB_FILE_NAME: &str = "benutzer.sqlite.db";
 
@@ -16,6 +17,17 @@ fn get_db_path() -> String {
         .parent()
         .unwrap()
         .join(DB_FILE_NAME)
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn get_keys_dir() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("keys")
         .to_str()
         .unwrap_or_default()
         .to_string()
@@ -59,6 +71,16 @@ pub fn create_database() -> Result<(), rusqlite::Error> {
             bezirk           VARCHAR(255) NOT NULL,
             blatt            INTEGER NOT NULL,
             aktenzeichen     VARCHAR(1023) NOT NULL
+        )",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS publickeys (
+                email           VARCHAR(255) NOT NULL,
+                pubkey          TEXT NOT NULL,
+                fingerprint     VARCHAR(2048) NOT NULL,
+                benutzt         INTEGER NOT NULL
         )",
         [],
     )?;
@@ -133,6 +155,12 @@ pub fn create_user(name: &str, email: &str, passwort: &str, rechte: &str) -> Res
 
     let password_hashed = hash_password(passwort).as_ref().to_vec();
 
+    let public_key = create_gpg_key(name, email)?;
+    conn.execute(
+        "INSERT INTO publickeys (email, fingerprint, pubkey, benutzt) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![email, public_key.0, public_key.1, 0],
+    ).map_err(|e| format!("Fehler beim Einfügen von publickey für {email} in Datenbank: {e}"))?;
+    
     conn.execute(
         "INSERT INTO benutzer (email, name, rechte, password_hashed) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![email, name, rechte, password_hashed],
@@ -192,46 +220,34 @@ fn verify_password(database_pw: &[u8], password: &str) -> bool {
     }
 }
 
-fn create_gpg_key(name: &str, email: &str) -> Result<String, String> {
-    Ok(String::new()) // TODO
+fn create_gpg_key(name: &str, email: &str) -> Result<(String, String), String> {
 
-    /*
-        let mut rng = rand::thread_rng();
-        let bits = 2048;
+    use std::path::Path;
+    use sequoia_openpgp::serialize::SerializeInto;
 
-        let private_key = RsaPrivateKey::new(&mut rng, bits)
-        .map_err(|e| format!("Fehler in RsaPrivateKey::new: {e}"))?;
+    let key = crate::pgp::generate(&format!("{name} <{email}>"))
+        .map_err(|e| format!("Konnte kein Zertifikat generieren: {e}"))?;
+    
+    let bytes = key.as_tsk().armored().to_vec()
+        .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
+        
+    let secret_key = String::from_utf8(bytes)
+    .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
+    
+    let _ = std::fs::create_dir_all(get_keys_dir());
+    
+    std::fs::write(Path::new(&get_keys_dir()).join(&format!("{email}.gpg")), &secret_key)
+        .map_err(|e| format!("Konnte GPG-Schlüssel nicht in /keys speichern: {key}: {e}"))?;
+        
+    let public_key_bytes = key.armored().to_vec()
+        .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
+    
+    let public_key_str = String::from_utf8(public_key_bytes)
+    .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
+    
+    let fingerprint = key.fingerprint();
 
-        let public_key = RsaPublicKey::from(&private_key);
-
-
-
-        private_key.write_pkcs8_pem_file(format!("./{email}.pem"), LineEnding::CRLF)
-        .map_err(|e| format!("Fehler beim Schreiben von {email}.pem: {e}"))?;
-    */
-
-    /*
-
-    let private_key = RsaPrivateKey::from_pkcs8_pem(&private_key)
-    .map_err(|e| format!("Ungültiger privater Schlüssel"))?;
-
-    let passwort_decrypted = private_key.decrypt(PaddingScheme::new_pkcs1v15_encrypt(), pw.as_ref())
-        .map_err(|e| format!("Passwort falsch: Privater Schlüssel ungültig für {email}"))?;
-
-    let passwort_decrypted = String::from_utf8(passwort_decrypted)
-        .map_err(|e| format!("Konnte Passwort nicht entschlüsseln"))?;
-
-    if passwort_decrypted != passwort {
-        return Err(format!("Ungültiges Passwort"));
-    }*/
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct BenutzerInfo {
-    pub id: i32,
-    pub rechte: String,
-    pub name: String,
-    pub email: String,
+    Ok((fingerprint.to_string(), public_key_str))
 }
 
 pub fn validate_user(query_string: &str) -> Result<BenutzerInfo, String> {
@@ -286,12 +302,44 @@ pub fn validate_user(query_string: &str) -> Result<BenutzerInfo, String> {
     })
 }
 
+pub fn get_public_key(email: &str, fingerprint: &str) -> Result<String, String> {
+    let conn = Connection::open(get_db_path())
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT pubkey FROM publickeys WHERE email = ?1 AND fingerprint = ?2")
+        .map_err(|e| format!("Fehler beim Auslesen der PublicKeys"))?;
+
+    let keys = stmt
+        .query_map([], |row| { Ok(row.get::<usize, String>(0)?) })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    let mut bz = Vec::new();
+    for b in keys {
+        if let Ok(b) = b {
+            bz.push(b);
+        }
+    }
+    
+    if bz.is_empty() {
+        Err(format!("Konnte keinen Schlüssel für {email} / {fingerprint} finden"))
+    } else {
+        Ok(bz[0].clone())
+    }
+}
+
 pub fn delete_user(email: &str) -> Result<(), String> {
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
         "DELETE FROM benutzer WHERE email = ?1",
+        rusqlite::params![email],
+    )
+    .map_err(|e| format!("Fehler beim Löschen von {email}: {e}"))?;
+    
+    conn.execute(
+        "DELETE FROM publickeys WHERE email = ?1 AND benutzt = 0",
         rusqlite::params![email],
     )
     .map_err(|e| format!("Fehler beim Löschen von {email}: {e}"))?;
