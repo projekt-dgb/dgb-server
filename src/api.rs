@@ -4,7 +4,7 @@ pub mod upload {
     use crate::models::{AuthFormData, PdfFile, BenutzerInfo};
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use url_encoded_data::UrlEncodedData;
     use std::path::PathBuf;
     
@@ -200,8 +200,10 @@ pub mod upload {
             );
         }
 
+        let server_url = "https://127.0.0.1"; // TODO
+        
         if !check.geaendert.is_empty() || !check.neu.is_empty() {
-            if let Err(e) = commit_changes(&folder_path, &benutzer, &upload_changeset) {
+            if let Err(e) = commit_changes(&server_url, &folder_path, &benutzer, &upload_changeset).await {
                 return HttpResponse::Ok().content_type("application/json").body(
                     serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
                         UploadChangesetResponseError {
@@ -302,7 +304,13 @@ pub mod upload {
         target
     }
     
-    fn commit_changes(folder_path: &PathBuf, benutzer: &BenutzerInfo, upload_changeset: &UploadChangeset) -> Result<(), i32> {
+    async fn commit_changes(
+        server_url: &str, 
+        folder_path: &PathBuf, 
+        benutzer: &BenutzerInfo, 
+        upload_changeset: &UploadChangeset
+    ) -> Result<(), i32> {
+    
         use git2::Repository;
 
         let repo = match Repository::open(&folder_path) {
@@ -337,9 +345,33 @@ pub mod upload {
             None => Vec::new(),
         };
 
-        let commit = repo
+        let commit_id = repo
             .commit(Some("HEAD"), &signature, &signature, &msg, &tree, &parents)
             .map_err(|_| 6)?;
+
+        let commit_id = commit_id.as_bytes()
+            .iter()
+            .map(|b| *b as char)
+            .collect::<String>();
+                
+        let geaendert_blaetter = upload_changeset.data.geaendert.iter()
+            .map(|aenderung| { 
+                let tb = &aenderung.neu.titelblatt;  
+                format!("{}/{}/{}", tb.amtsgericht, tb.grundbuch_von, tb.blatt)
+            })
+            .collect::<BTreeSet<_>>();
+        
+        for blatt in geaendert_blaetter {
+            let email_abos = crate::db::get_email_abos(&blatt, &commit_id).map_err(|_| 6)?;
+            for abo_info in email_abos {
+                let _ = crate::email::send_change_email(server_url, &abo_info).map_err(|_| 7)?;
+            }
+            
+            let webhook_abos = crate::db::get_webhook_abos(&blatt, &commit_id).map_err(|_| 8)?;
+            for abo_info in webhook_abos {
+                let _ = crate::email::send_change_webhook(server_url, &abo_info).await.map_err(|_| 9)?;
+            }
+        }
         
         Ok(())
     }
