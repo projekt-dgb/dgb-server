@@ -5,7 +5,7 @@ use rsa::{
     PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey,
 };
 use rusqlite::{Connection, OpenFlags};
-use crate::models::BenutzerInfo;
+use crate::models::{BenutzerInfo, AbonnementInfo};
 
 pub static DB_FILE_NAME: &str = "benutzer.sqlite.db";
 
@@ -66,7 +66,8 @@ pub fn create_database() -> Result<(), rusqlite::Error> {
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS abonnements (
-            email            VARCHAR(1023) NOT NULL,
+            typ              VARCHAR(50) NOT NULL,
+            text             VARCHAR(1023) NOT NULL,
             amtsgericht      VARCHAR(255) NOT NULL,
             bezirk           VARCHAR(255) NOT NULL,
             blatt            INTEGER NOT NULL,
@@ -347,7 +348,13 @@ pub fn delete_user(email: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn create_abo(blatt: &str, email: &str, aktenzeichen: &str) -> Result<(), String> {
+pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Result<(), String> {
+    
+    match typ {
+        "email" | "webhook" => { },
+        _ => { return Err(format!("Ungültiger Abonnement-Typ: {typ}")); },
+    }
+        
     let blatt_split = blatt
         .split("/")
         .map(|s| s.trim().to_string())
@@ -381,14 +388,93 @@ pub fn create_abo(blatt: &str, email: &str, aktenzeichen: &str) -> Result<(), St
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
-        "INSERT INTO abonnements (email, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![email, amtsgericht, bezirk, b, aktenzeichen],
+        "INSERT INTO abonnements (typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![typ, text, amtsgericht, bezirk, b, aktenzeichen],
     ).map_err(|e| format!("Fehler beim Einfügen von {blatt} in Abonnements: {e}"))?;
 
     Ok(())
 }
 
-pub fn delete_abo(blatt: &str, email: &str, aktenzeichen: &str) -> Result<(), String> {
+pub fn get_email_abos(blatt: &str, commit_id: &str) -> Result<Vec<AbonnementInfo>, String> {
+    get_abos_inner("email", blatt, commit_id)
+}
+
+pub fn get_webhook_abos(blatt: &str, commit_id: &str) -> Result<Vec<AbonnementInfo>, String> {
+    get_abos_inner("webhook", blatt, commit_id)
+}
+
+fn get_abos_inner(typ: &'static str, blatt: &str, commit_id: &str) -> Result<Vec<AbonnementInfo>, String> {
+    
+    let blatt_split = blatt
+        .split("/")
+        .map(|s| s.trim().to_string())
+        .collect::<Vec<_>>();
+
+    let amtsgericht = match blatt_split.get(0) {
+        Some(s) => s.trim().to_string(),
+        None => {
+            return Err(format!("Kein Amtsgericht angegeben für Abonnement {blatt}"));
+        }
+    };
+
+    let bezirk = match blatt_split.get(1) {
+        Some(s) => s.trim().to_string(),
+        None => {
+            return Err(format!("Kein Bezirk angegeben für Abonnement {blatt}"));
+        }
+    };
+
+    let b = match blatt_split.get(2) {
+        Some(s) => s
+            .trim()
+            .parse::<i32>()
+            .map_err(|e| format!("Ungültige Blatt-Nr. {s}: {e}"))?,
+        None => {
+            return Err(format!("Kein Blatt angegeben für Abonnement {blatt}"));
+        }
+    };
+    
+    let conn = Connection::open(get_db_path())
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+        
+    let mut stmt = conn
+        .prepare("SELECT text, aktenzeichen FROM abonnements WHERE typ = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4")
+        .map_err(|e| format!("Fehler beim Auslesen der Bezirke"))?;
+
+    let abos = stmt
+        .query_map(rusqlite::params![typ, amtsgericht, bezirk, blatt], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+                row.get::<usize, String>(1)?
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut bz = Vec::new();
+    
+    for a in abos {
+        if let Ok((email, aktenzeichen)) = a {
+            bz.push(AbonnementInfo {
+                amtsgericht: amtsgericht.clone(),
+                grundbuchbezirk: bezirk.clone(),
+                blatt: b.clone(),
+                text: email.to_string(),
+                aktenzeichen: aktenzeichen.to_string(),
+                commit_id: commit_id.to_string(),
+            });
+        }
+    }
+    
+    Ok(bz)
+}
+
+pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Result<(), String> {
+    
+    match typ {
+        "email" | "webhook" => { },
+        _ => { return Err(format!("Ungültiger Abonnement-Typ: {typ}")); },
+    }
+    
     let blatt_split = blatt
         .split("/")
         .map(|s| s.trim().to_string())
@@ -422,8 +508,8 @@ pub fn delete_abo(blatt: &str, email: &str, aktenzeichen: &str) -> Result<(), St
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
-        "DELETE FROM abonnements WHERE email = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND aktenzeichen = ?5",
-        rusqlite::params![email, amtsgericht, bezirk, b, aktenzeichen],
+        "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND aktenzeichen = ?5 AND typ = ?6",
+        rusqlite::params![text, amtsgericht, bezirk, b, aktenzeichen, typ],
     ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
 
     Ok(())

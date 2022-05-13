@@ -56,6 +56,7 @@ pub mod api;
 pub mod db;
 pub mod models;
 pub mod pgp;
+pub mod email;
 
 /*
 pub mod pdf;
@@ -91,7 +92,7 @@ enum ArgAction {
     /// Grundbuchbezirk löschen (--land, --amtsgericht, --bezirk)
     BezirkLoeschen(BezirkLoeschenArgs),
 
-    /// Neues Abonnement anlegen (--email, --aktenzeichen)
+    /// Neues Abonnement anlegen (--typ, --email, --aktenzeichen)
     AboNeu(AboNeuArgs),
     /// Abonnement löschen (--email, --aktenzeichen)
     AboLoeschen(AboLoeschenArgs),
@@ -160,6 +161,10 @@ struct BezirkLoeschenArgs {
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
 struct AboNeuArgs {
+    /// Typ des Abonnements ("email" oder "webhook")
+    #[clap(short, long)]
+    typ: String,
+    
     /// Name des Amtsgerichts / Gemarkung / Blatts des neuen Abos, 
     /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254")
     #[clap(short, long)]
@@ -177,6 +182,10 @@ struct AboNeuArgs {
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
 struct AboLoeschenArgs {
+    /// Typ des Abonnements ("email" oder "webhook")
+    #[clap(short, long)]
+    typ: String,
+    
     /// Name des Amtsgerichts / Gemarkung / Blatts des Abos, 
     /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254 ")
     #[clap(short, long)]
@@ -212,15 +221,17 @@ fn process_action(action: &ArgAction) -> Result<(), String> {
             bezirk,
         }) => crate::db::delete_gemarkung(land, amtsgericht, bezirk),
         AboNeu(AboNeuArgs {
+            typ,
             blatt,
             email,
             aktenzeichen,
-        }) => crate::db::create_abo(blatt, email, aktenzeichen),
+        }) => crate::db::create_abo(typ, blatt, email, aktenzeichen),
         AboLoeschen(AboLoeschenArgs {
+            typ,
             blatt,
             email,
             aktenzeichen,
-        }) => crate::db::delete_abo(blatt, email, aktenzeichen),
+        }) => crate::db::delete_abo(typ, blatt, email, aktenzeichen),
     }
 }
 

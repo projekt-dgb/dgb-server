@@ -740,5 +740,102 @@ pub mod suche {
     }
 }
 
-/// API für `/aenderung` Anfragen
-pub mod aenderung {}
+/// API für `/abo` Anfragen
+pub mod abo {
+
+    use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
+    use serde_derive::{Deserialize, Serialize};
+    
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum AboNeuAnfrage {
+        #[serde(rename = "ok")]
+        Ok(AboNeuAnfrageOk),
+        #[serde(rename = "error")]
+        Err(AboNeuAnfrageErr),
+    }
+    
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct AboNeuAnfrageOk { }
+    
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct AboNeuAnfrageErr {
+        code: usize,
+        text: String,
+    }
+
+    #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}")]
+    async fn abo_neu(tag: web::Path<(String, String, String, usize, String)>, req: HttpRequest) -> impl Responder {
+        
+        let benutzer = match crate::db::validate_user(&req.query_string()) {
+            Ok(o) => o,
+            Err(e) => {
+                let json = serde_json::to_string_pretty(&AboNeuAnfrage::Err(
+                    AboNeuAnfrageErr {
+                        code: 0,
+                        text: e.clone(),
+                    },
+                ))
+                .unwrap_or_default();
+
+                return HttpResponse::Ok()
+                    .content_type("application/json")
+                    .body(json);
+            }
+        };
+    
+        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag) = &*tag;
+        
+        if let Err(e) = crate::db::create_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &benutzer.email, &tag) {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+                    code: 0,
+                    text: format!("{e}"),
+                }))
+                .unwrap_or_default());
+        }
+        
+        return HttpResponse::Ok()
+        .content_type("application/json")
+        .body(serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { }))
+        .unwrap_or_default());
+    }
+    
+    #[get("/abo-loeschen/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}")]
+    async fn abo_loeschen(tag: web::Path<(String, String, String, usize, String)>, req: HttpRequest) -> impl Responder {
+        
+        let benutzer = match crate::db::validate_user(&req.query_string()) {
+            Ok(o) => o,
+            Err(e) => {
+                let json = serde_json::to_string_pretty(&AboNeuAnfrage::Err(
+                    AboNeuAnfrageErr {
+                        code: 0,
+                        text: e.clone(),
+                    },
+                ))
+                .unwrap_or_default();
+
+                return HttpResponse::Ok()
+                    .content_type("application/json")
+                    .body(json);
+            }
+        };
+    
+        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag) = &*tag;
+        
+        if let Err(e) = crate::db::delete_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &benutzer.email, &tag) {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+                    code: 0,
+                    text: format!("{e}"),
+                }))
+                .unwrap_or_default());
+        }
+        
+        return HttpResponse::Ok()
+        .content_type("application/json")
+        .body(serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { }))
+        .unwrap_or_default());
+    }
+}
