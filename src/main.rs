@@ -57,11 +57,7 @@ pub mod db;
 pub mod models;
 pub mod pgp;
 pub mod email;
-
-/*
-pub mod pdf;
-pub mod suche;
-*/
+// pub mod suche;
 
 /// Kommandozeilenargumente
 #[derive(clap::Parser, Debug)]
