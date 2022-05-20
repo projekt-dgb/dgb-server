@@ -1,9 +1,36 @@
 use crate::models::AbonnementInfo;
 use lettre::{
     message::{header, MultiPart, SinglePart},
-    FileTransport, Message, Transport,
+    SmtpTransport, Message, Transport,
 };
 use serde_derive::{Serialize, Deserialize};
+use std::sync::Mutex;
+
+// Um die E-Mails zu verschicken, brauchen wir Zugriff
+// zu einem Server. Die Daten werden beim Start des Servers
+// angefordert. 
+#[derive(Debug, Clone, Default)]
+pub struct SmtpConfig {
+    // = "smtp.example.com"
+    pub smtp_adresse: String,
+    // = "name@example.com"
+    pub email: String,
+    // = "123"
+    pub passwort: String,
+}
+
+lazy_static::lazy_static! {
+    static ref CONFIG: Mutex<Option<SmtpConfig>> = Mutex::new(None);
+}
+
+pub fn init_email_config(smtp: SmtpConfig) -> Option<()> {
+    *CONFIG.lock().ok()? = Some(smtp);
+    Some(())
+}
+
+pub fn get_email_config() -> Option<SmtpConfig> {
+    CONFIG.lock().ok()?.clone()
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AboWebhookInfo {
@@ -17,6 +44,11 @@ pub struct AboWebhookInfo {
 }
 
 pub fn send_change_email(server_url: &str, abo: &AbonnementInfo) -> Result<(), String> {
+    
+    use lettre::transport::smtp::PoolConfig;
+    use lettre::transport::smtp::SmtpTransportBuilder;
+    use lettre::transport::smtp::authentication::Credentials;
+    use lettre::transport::smtp::authentication::Mechanism;
     
     let AbonnementInfo {
         amtsgericht,
@@ -34,7 +66,7 @@ pub fn send_change_email(server_url: &str, abo: &AbonnementInfo) -> Result<(), S
     let aktenzeichen_url = urlencoding::encode(aktenzeichen);
     
     let html = format!("<!DOCTYPE html>
-    <html lang=\"de\">
+    <html lang=\"de\">SmtpClient
     <head>
         <meta charset=\"UTF-8\">
         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
@@ -54,26 +86,22 @@ pub fn send_change_email(server_url: &str, abo: &AbonnementInfo) -> Result<(), S
                 <li>Ihr Zeichen: {aktenzeichen}</li>
             </ul>
             
-            <p>Um die volle Grundbuchänderung in PDF-Form einzusehen, folgen Sie bitten dem folgenden Link:</p><br/>
+            <p>Um die volle Grundbuchänderung in PDF-Form einzusehen, folgen Sie bitten dem folgenden Link:</p>
             <a href=\"{server_url}/aenderung/pdf/{commit_id}?email={email_url}\">{server_url}/aenderung/pdf/{commit_id}?email={email_url}</a>
             <br/>
-            <p>Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgenden Link:</p><br/>
-            <a href=\"{server_url}/aenderung/code/{commit_id}?email={email_url}\">{server_url}/aenderung/pdf/{commit_id}?email={email_url}</a>
+            <p>Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgenden Link:</p>
+            <a href=\"{server_url}/aenderung/diff/{commit_id}?email={email_url}\">{server_url}/aenderung/diff/{commit_id}?email={email_url}</a>
             <br/>
             
             <br/>
 
             <p>Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.</p>
-            <p>Um das Abonnement zu kündigen, klicken Sie bitte 
-                <a href=\"{server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}\">hier</a>
-            .</p>
+            <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}\">hier</a>.</p>
         </div>
     </body>
     </html>");
     
-    let plaintext = format!("**Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})**
-            
-Guten Tag,
+    let plaintext = format!("Guten Tag,
 
 in den folgenden Grundbuchblättern sind Änderungen vorgenommen worden:
 
@@ -84,16 +112,18 @@ Um die volle Grundbuchänderung in PDF-Form einzusehen, folgen Sie bitten dem fo
 {server_url}/aenderung/pdf/{commit_id}?email={email_url}
 
 Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgenden Link:
-{server_url}/aenderung/pdf/{commit_id}?email={email_url}
+{server_url}/aenderung/diff/{commit_id}?email={email_url}
 
 Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.
 Um das Abonnement zu kündigen, klicken Sie bitte hier:
 {server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}
     ");
+        
+    let amtsgericht_url_lower = amtsgericht_url.to_lowercase();
     
     let email = Message::builder()
-    .from("Amtsgericht {amtsgericht} <ag-{amtsgericht_url}@grundbuchaenderung.de>".parse().unwrap())
-    .to(email.parse().unwrap())
+    .from(format!("Amtsgericht {amtsgericht} <ag-{amtsgericht_url_lower}@grundbuchaenderung.de>").parse().map_err(|e| format!("Ungültige Sender-E-Mail: {e}"))?)
+    .to(email.parse().map_err(|e| format!("Ungültige Empfänger-E-Mail: {e}"))?)
     .subject(&format!("Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})"))
     .multipart(
         MultiPart::alternative() // This is composed of two parts.
@@ -110,15 +140,23 @@ Um das Abonnement zu kündigen, klicken Sie bitte hier:
     )
     .map_err(|e| format!("failed to build email"))?;
 
-    // Create our mailer. Please see the other examples for creating SMTP mailers.
-    // The path given here must exist on the filesystem.
-    let _ = std::fs::create_dir_all("./email");
-    let mailer = FileTransport::new("./email");
-
+    let config = get_email_config()
+        .ok_or(format!("Kann keine E-Mails senden: E-Mail Provider nicht initialisiert"))?;
+        
+    let mailer = SmtpTransport::starttls_relay(&config.smtp_adresse)
+        .map_err(|e| format!("{e}"))?
+        .credentials(Credentials::new(
+            config.email.clone(),
+            config.passwort.clone(),
+        ))
+        .authentication(vec![Mechanism::Plain])
+        .pool_config(PoolConfig::new().max_size(20))
+        .build();
+    
     // Store the message when you're ready.
     mailer
     .send(&email)
-    .map_err(|e| format!("failed to deliver message"))?;
+    .map_err(|e| format!("failed to deliver message: {e}"))?;
     
     Ok(())
 }

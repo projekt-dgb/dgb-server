@@ -5,35 +5,12 @@ use rsa::{
     PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey,
 };
 use rusqlite::{Connection, OpenFlags};
-use crate::models::{BenutzerInfo, AbonnementInfo};
-
-pub static DB_FILE_NAME: &str = "benutzer.sqlite.db";
+use crate::models::{BenutzerInfo, AbonnementInfo, get_db_path, get_keys_dir};
 
 pub type GemarkungsBezirke = Vec<(String, String, String)>;
 
-fn get_db_path() -> String {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join(DB_FILE_NAME)
-        .to_str()
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn get_keys_dir() -> String {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("keys")
-        .to_str()
-        .unwrap_or_default()
-        .to_string()
-}
-
 pub fn create_database() -> Result<(), rusqlite::Error> {
+
     let mut open_flags = OpenFlags::empty();
 
     open_flags.set(OpenFlags::SQLITE_OPEN_CREATE, true);
@@ -251,6 +228,50 @@ fn create_gpg_key(name: &str, email: &str) -> Result<(String, String), String> {
     Ok((fingerprint.to_string(), public_key_str))
 }
 
+
+pub fn get_key_for_fingerprint(fingerprint: &str, email: &str) -> Result<sequoia_openpgp::Cert, String> {
+    
+    use sequoia_openpgp::parse::PacketParser;
+    use sequoia_openpgp::Cert;
+    use sequoia_openpgp::parse::Parse;
+    
+    println!("opening connection to db: {}", get_db_path());
+    let conn = Connection::open(get_db_path())
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    let mut stmt = conn
+        .prepare("SELECT pubkey FROM publickeys WHERE email = ?1 AND fingerprint = ?2")
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+
+    println!("stmt ok!");
+    
+    let pubkeys = stmt
+        .query_map(rusqlite::params![email, fingerprint], |row| {
+            Ok(row.get::<usize, String>(0)?)
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .collect::<Vec<_>>();
+
+    println!("pubkeys ok!");
+
+    let pubkey = match pubkeys.get(0) {
+        Some(Ok(s)) => s,
+        _ => return Err(format!("Kein öffentlicher Schlüssel für E-Mail {email:?} / Fingerprint {fingerprint:?} gefunden")),
+    };
+    
+    println!("get_key_for_fingerprint: {email}:\r\n{pubkey}");
+    
+    let ppr = PacketParser::from_bytes(pubkey.as_bytes())
+        .map_err(|e| format!("{e}"))?;
+    
+    let cert = Cert::try_from(ppr)
+        .map_err(|e| format!("{e}"))?;
+    
+    println!("ok cert created!");
+    
+    Ok(cert)
+}
+
 pub fn validate_user(query_string: &str) -> Result<BenutzerInfo, String> {
     use url_encoded_data::UrlEncodedData;
 
@@ -387,8 +408,16 @@ pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Res
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
+        /*
+            typ              VARCHAR(50) NOT NULL,
+            text             VARCHAR(1023) NOT NULL,
+            amtsgericht      VARCHAR(255) NOT NULL,
+            bezirk           VARCHAR(255) NOT NULL,
+            blatt            INTEGER NOT NULL,
+            aktenzeichen     VARCHAR(1023) NOT NULL
+        */
     conn.execute(
-        "INSERT INTO abonnements (typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO abonnements (typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![typ, text, amtsgericht, bezirk, b, aktenzeichen],
     ).map_err(|e| format!("Fehler beim Einfügen von {blatt} in Abonnements: {e}"))?;
 
@@ -440,9 +469,11 @@ fn get_abos_inner(typ: &'static str, blatt: &str, commit_id: &str) -> Result<Vec
     let mut stmt = conn
         .prepare("SELECT text, aktenzeichen FROM abonnements WHERE typ = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4")
         .map_err(|e| format!("Fehler beim Auslesen der Bezirke"))?;
-
+    
+    println!("get_abos_inner: {typ}, {amtsgericht}, {bezirk}, {blatt}");
+    
     let abos = stmt
-        .query_map(rusqlite::params![typ, amtsgericht, bezirk, blatt], |row| {
+        .query_map(rusqlite::params![typ, amtsgericht, bezirk, b], |row| {
             Ok((
                 row.get::<usize, String>(0)?,
                 row.get::<usize, String>(1)?

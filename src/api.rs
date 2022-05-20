@@ -1,7 +1,7 @@
 /// API für `/upload` Anfragen
 pub mod upload {
 
-    use crate::models::{AuthFormData, PdfFile, BenutzerInfo};
+    use crate::models::{AuthFormData, PdfFile, BenutzerInfo, get_data_dir};
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
     use std::collections::{BTreeMap, BTreeSet};
@@ -15,8 +15,14 @@ pub mod upload {
         pub titel: String,
         pub beschreibung: Vec<String>,
         pub fingerprint: String,
-        pub signatur: Vec<String>,
+        pub signatur: PgpSignatur,
         pub data: UploadChangesetData,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct PgpSignatur {
+        pub hash: String,
+        pub pgp_signatur: Vec<String>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +64,10 @@ pub mod upload {
         req: HttpRequest,
     ) -> impl Responder {
         
+        use std::path::Path;
+        
         let upload_changeset = &*upload_changeset;
+        
         let benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
             Err(e) => {
@@ -75,13 +84,21 @@ pub mod upload {
                     .body(json);
             }
         };
-
-        let folder_path = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("data");
-
+        
+        if let Err(e) = verify_signature(&benutzer.email, &upload_changeset) {
+            return HttpResponse::Ok().content_type("application/json").body(
+                serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                    UploadChangesetResponseError {
+                        code: 500,
+                        text: format!("Fehler bei Überprüfung der digitalen Signatur:\r\n{e}"),
+                    },
+                ))
+                .unwrap_or_default(),
+            );
+        }
+        
+        let folder_path = get_data_dir();
+        let folder_path = Path::new(&folder_path);
         if !folder_path.exists() {
             let _ = std::fs::create_dir(folder_path.clone());
         }
@@ -93,6 +110,8 @@ pub mod upload {
 
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
 
+        println!("gemarkungen: {:?}", gemarkungen);
+        
         for neu in upload_changeset.data.neu.iter() {
         
             let amtsgericht = &neu.titelblatt.amtsgericht;
@@ -118,17 +137,20 @@ pub mod upload {
                 },
                 Some(s) => s,
             };
-
+            
             let blatt = neu.titelblatt.blatt;
             let target_path = folder_path
                 .clone()
-                .join(land)
+                .join(land.clone())
                 .join(amtsgericht)
                 .join(grundbuch)
                 .join(&format!("{grundbuch}_{blatt}.gbx"));
-            
+                        
             let target_json = serde_json::to_string_pretty(&neu).unwrap_or_default();
-            let target_folder = folder_path.clone().join(amtsgericht).join(grundbuch);
+            let target_folder = folder_path.clone()
+                .join(land)
+                .join(amtsgericht)
+                .join(grundbuch);
 
             let _ = std::fs::create_dir_all(&target_folder);
             let _ = std::fs::write(target_path, target_json.as_bytes());
@@ -166,49 +188,34 @@ pub mod upload {
             let blatt = geaendert.neu.titelblatt.blatt;
             let target_path = folder_path
                 .clone()
-                .join(land)
+                .join(land.clone())
                 .join(amtsgericht)
                 .join(grundbuch)
                 .join(&format!("{grundbuch}_{blatt}.gbx"));
             
             let target_json = serde_json::to_string_pretty(&geaendert.neu).unwrap_or_default();
-            let target_folder = folder_path.clone().join(amtsgericht).join(grundbuch);
+            let target_folder = folder_path.clone()
+                .join(land)
+                .join(amtsgericht)
+                .join(grundbuch);
 
             let _ = std::fs::create_dir_all(&target_folder);
             let _ = std::fs::write(target_path, target_json.as_bytes());
 
             check.geaendert.push(geaendert.neu.clone());
         }
-
-        if let Err(e) = verify_signature(
-            &benutzer.name,
-            &benutzer.email,
-            &upload_changeset.fingerprint,
-            &upload_changeset.titel,
-            &upload_changeset.beschreibung,
-            &upload_changeset.data, 
-            &upload_changeset.signatur,
-        ) {
-            return HttpResponse::Ok().content_type("application/json").body(
-                serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                    UploadChangesetResponseError {
-                        code: 500,
-                        text: format!("Fehler bei Überprüfung der digitalen Signatur: {e}"),
-                    },
-                ))
-                .unwrap_or_default(),
-            );
-        }
-
+        
         let server_url = "https://127.0.0.1"; // TODO
         
         if !check.geaendert.is_empty() || !check.neu.is_empty() {
-            if let Err(e) = commit_changes(&server_url, &folder_path, &benutzer, &upload_changeset).await {
-                return HttpResponse::Ok().content_type("application/json").body(
+            if let Err(e) = commit_changes(&server_url, &folder_path.to_path_buf(), &benutzer, &upload_changeset).await {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(
                     serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
                         UploadChangesetResponseError {
-                            code: e as isize,
-                            text: format!("Konnte Änderungstext nicht speichern"),
+                            code: 500,
+                            text: format!("Konnte Änderungstext nicht speichern: {e}"),
                         },
                     ))
                     .unwrap_or_default(),
@@ -216,37 +223,31 @@ pub mod upload {
             }
         }
 
-        HttpResponse::Ok().content_type("application/json").body(
+        HttpResponse::Ok()
+        .content_type("application/json")
+        .body(
             serde_json::to_string_pretty(&UploadChangesetResponse::StatusOk(check))
                 .unwrap_or_default(),
         )
     }
     
-    fn verify_signature(
-        name: &str,
-        email: &str,
-        fingerprint: &str,
-        titel: &str,
-        beschreibung: &[String],
-        data: &UploadChangesetData,
-        signature: &[String],
-    ) -> Result<bool, String> {
+    fn verify_signature(email: &str, changeset: &UploadChangeset) -> Result<bool, String> {
+
+        use sequoia_openpgp::policy::StandardPolicy as P;
+
+        let json = serde_json::to_string_pretty(&changeset.data)
+            .map_err(|e| format!("Konnte .data nicht zu JSON konvertieren: {e}"))?;
+        let hash = &changeset.signatur.hash;
+        let signatur = changeset.signatur.pgp_signatur.clone().join("\r\n");
+        let msg = format!("-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: {hash}\r\n\r\n{json}\r\n-----BEGIN PGP SIGNATURE-----\r\n{signatur}\r\n-----END PGP SIGNATURE-----");
+
+        let p = &P::new();
+        let cert = crate::db::get_key_for_fingerprint(&changeset.fingerprint, email)?;
+        let mut plaintext = Vec::new();
+        let _ = crate::pgp::verify(p, &mut plaintext, msg.as_bytes(), &cert)
+            .map_err(|e| format!("{e}"))?;
         
         Ok(true)
-        
-    /*
-        let text_signed = create_text(
-            name: &str,
-            email: &str,
-            fingerprint: &str,
-            beschreibung_titel: &str,
-            beschreibung_no_key: &[String],
-            data: &UploadChangesetData,
-        );
-    */  
-
-        // let data = ; 
-        // from_bytes(bytes: impl AsRef<[u8]>) -> Result<Data<'static>>
     }
     
     fn commit_header_no_signature(
@@ -256,11 +257,11 @@ pub mod upload {
     ) -> String {
         let mut target = String::new();
         target.push_str(commit_titel);
-        target.push_str("\r\n");
-        target.push_str(&commit_beschreibung.to_vec().join("\r\n"));
-        target.push_str("\r\n");
-        target.push_str(fingerprint);
-        target.push_str("\r\n");
+        target.push_str("\r\n\r\n");
+        if !commit_beschreibung.is_empty() {
+            target.push_str(&commit_beschreibung.to_vec().join("\r\n"));
+            target.push_str("\r\n");        
+        }
         target
     }
     
@@ -268,40 +269,17 @@ pub mod upload {
         commit_titel: &str,
         commit_beschreibung: &[String],
         fingerprint: &str,
-        signature: &[String],
+        signatur: &PgpSignatur,
     ) -> String {
         let mut no_sig = commit_header_no_signature(commit_titel, commit_beschreibung, fingerprint);
         no_sig.push_str("\r\n");
-        no_sig.push_str(&signature.to_vec().join("\r\n"));
+        no_sig.push_str(&format!("Hash:         {}\r\n", signatur.hash));
+        no_sig.push_str(&format!("Schlüssel-ID: {fingerprint}\r\n"));
+        no_sig.push_str("\r\n");
+        no_sig.push_str("-----BEGIN PGP SIGNATURE-----\r\n");
+        no_sig.push_str(&signatur.pgp_signatur.to_vec().join("\r\n"));
+        no_sig.push_str("\r\n-----END PGP SIGNATURE-----\r\n");
         no_sig
-    }
-    
-    fn create_text(
-        commit_titel: &str,
-        commit_beschreibung: &[String],
-        fingerprint: &str,
-        data: &UploadChangesetData,
-    ) -> String {
-    
-        let mut target = String::new();
-        
-        target.push_str(&commit_header_no_signature(
-            commit_titel,
-            commit_beschreibung,
-            fingerprint,
-        ));
-        
-        target.push_str("\r\n");
-        
-        let json = serde_json::to_string_pretty(&data)
-            .unwrap_or_default()
-            .lines()
-            .collect::<Vec<_>>()
-            .join("\r\n");
-        
-        target.push_str(&json);
-        
-        target
     }
     
     async fn commit_changes(
@@ -309,30 +287,31 @@ pub mod upload {
         folder_path: &PathBuf, 
         benutzer: &BenutzerInfo, 
         upload_changeset: &UploadChangeset
-    ) -> Result<(), i32> {
+    ) -> Result<(), String> {
     
         use git2::Repository;
 
         let repo = match Repository::open(&folder_path) {
             Ok(o) => o,
-            Err(_) => { Repository::init(&folder_path).map_err(|_| 1)? },
+            Err(_) => { Repository::init(&folder_path).map_err(|e| format!("{e}"))? },
         };
 
-        let mut index = repo.index().map_err(|_| 2)?;
+        let mut index = repo.index().map_err(|e| format!("{e}"))?;
         let _ = index.add_all(["*.gbx"].iter(), git2::IndexAddOption::DEFAULT, None);
         let _ = index.write();
 
-        let signature = git2::Signature::now(&benutzer.name, &benutzer.email).map_err(|_| 3)?;
+        let signature = git2::Signature::now(&benutzer.name, &benutzer.email)
+            .map_err(|e| format!("{e}"))?;
 
         let msg = commit_header_with_signature(
             upload_changeset.titel.trim(),
             upload_changeset.beschreibung.as_ref(),
             upload_changeset.fingerprint.as_str(),
-            upload_changeset.signatur.as_ref(),
+            &upload_changeset.signatur,
         );
-        
-        let id = index.write_tree().map_err(|_| 4)?;
-        let tree = repo.find_tree(id).map_err(|_| 5)?;
+                
+        let id = index.write_tree().map_err(|e| format!("{e}"))?;
+        let tree = repo.find_tree(id).map_err(|e| format!("{e}"))?;
 
         let parent = repo
             .head()
@@ -347,12 +326,9 @@ pub mod upload {
 
         let commit_id = repo
             .commit(Some("HEAD"), &signature, &signature, &msg, &tree, &parents)
-            .map_err(|_| 6)?;
+            .map_err(|e| format!("{e}"))?;
 
-        let commit_id = commit_id.as_bytes()
-            .iter()
-            .map(|b| *b as char)
-            .collect::<String>();
+        let commit_id = format!("{}", commit_id);
                 
         let geaendert_blaetter = upload_changeset.data.geaendert.iter()
             .map(|aenderung| { 
@@ -361,18 +337,24 @@ pub mod upload {
             })
             .collect::<BTreeSet<_>>();
         
-        for blatt in geaendert_blaetter {
-            let email_abos = crate::db::get_email_abos(&blatt, &commit_id).map_err(|_| 6)?;
-            for abo_info in email_abos {
-                let _ = crate::email::send_change_email(server_url, &abo_info).map_err(|_| 7)?;
+
+        for blatt in geaendert_blaetter {            
+            
+            let webhook_abos = crate::db::get_webhook_abos(&blatt, &commit_id)
+                .map_err(|e| format!("{e}"))?;
+            
+            for abo_info in webhook_abos {
+                let _ = crate::email::send_change_webhook(server_url, &abo_info).await;
             }
             
-            let webhook_abos = crate::db::get_webhook_abos(&blatt, &commit_id).map_err(|_| 8)?;
-            for abo_info in webhook_abos {
-                let _ = crate::email::send_change_webhook(server_url, &abo_info).await.map_err(|_| 9)?;
+            let email_abos = crate::db::get_email_abos(&blatt, &commit_id)
+                .map_err(|e| format!("{e}"))?;
+            
+            for abo_info in email_abos {
+                let _ = crate::email::send_change_email(server_url, &abo_info);
             }
         }
-        
+                
         Ok(())
     }
 }
@@ -380,11 +362,12 @@ pub mod upload {
 /// API für `/download` Anfragen
 pub mod download {
 
-    use crate::models::{AuthFormData, PdfFile};
+    use crate::models::{AuthFormData, PdfFile, get_data_dir};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
     use url_encoded_data::UrlEncodedData;
-
+    use std::path::Path;
+    
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(tag = "status")]
     pub enum PdfFileOrEmpty {
@@ -423,67 +406,43 @@ pub mod download {
         };
 
         let (amtsgericht, grundbuch_von, blatt) = &*path;
+        let mut amtsgericht = amtsgericht.clone();
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
 
-        if !gemarkungen
-            .iter()
-            .any(|(land, ag, bezirk)| ag == amtsgericht && bezirk == grundbuch_von)
-        {
-            return HttpResponse::Ok()
-            .content_type("application/json")
-            .body(serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(PdfFileNichtVorhanden {
-                code: 1,
-                text: format!("Ungültiges Amtsgericht oder ungültige Gemarkung: {amtsgericht}/{grundbuch_von}"),
-            })).unwrap_or_default());
-        }
-
-        let folder_path = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("data");
-
-        let file: Option<PdfFile> = if amtsgericht == "*" {
-            let mut result_file_path = None;
-            if let Some(s) = std::fs::read_dir(&folder_path).ok() {
-                for entry in s {
-                    let entry = match entry.ok() {
-                        Some(s) => s,
-                        None => continue,
-                    };
-
-                    let path = entry.path();
-                    let metadata = match std::fs::metadata(&path).ok() {
-                        Some(s) => s,
-                        None => continue,
-                    };
-
-                    if !metadata.is_dir() {
-                        continue;
-                    }
-
-                    if path.ends_with(&grundbuch_von) {
-                        result_file_path = Some(path.to_path_buf());
-                        break;
-                    }
-                }
+        let mut l = None;
+        for (land, ag, bezirk) in gemarkungen.iter() {
+            if (amtsgericht == "*" && bezirk == grundbuch_von) ||
+               (ag.as_str() == amtsgericht.as_str() && bezirk == grundbuch_von) {
+                amtsgericht = ag.clone();
+                l = Some(land.clone());
+                break;
             }
+        }
+        
+        let land = match l {
+            Some(s) => s,
+            None => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(PdfFileNichtVorhanden {
+                    code: 1,
+                    text: format!("Ungültiges Amtsgericht oder ungültige Gemarkung: {amtsgericht}/{grundbuch_von}"),
+                })).unwrap_or_default());
+            }
+        };
 
-            result_file_path.as_ref().and_then(|fp| {
-                let file_path = fp.join(&format!("{grundbuch_von}_{blatt}.gbx"));
-                std::fs::read_to_string(&file_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-            })
-        } else {
-            let file_path = folder_path
+        let folder_path = get_data_dir();
+        let folder_path = Path::new(&folder_path);
+        
+        let file_path = folder_path
+                .join(land)
                 .join(amtsgericht)
                 .join(grundbuch_von)
                 .join(&format!("{grundbuch_von}_{blatt}.gbx"));
-            std::fs::read_to_string(&file_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-        };
+            
+        let file: Option<PdfFile> = std::fs::read_to_string(&file_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok());
 
         let response_json = match file {
             Some(s) => PdfFileOrEmpty::Pdf(s),
@@ -537,7 +496,7 @@ pub mod download {
 /// API für `/suche` Anfragen
 pub mod suche {
 
-    use crate::models::{AuthFormData, PdfFile, Titelblatt};
+    use crate::models::{AuthFormData, PdfFile, Titelblatt, get_data_dir};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use regex::Regex;
     use serde_derive::{Deserialize, Serialize};
@@ -598,14 +557,7 @@ pub mod suche {
             }
         };
         
-        let folder_path = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("data")
-            .to_str()
-            .unwrap_or_default()
-            .to_string();
+        let folder_path = get_data_dir();
 
         let mut ergebnisse = Vec::new();
 

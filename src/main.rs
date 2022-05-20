@@ -57,6 +57,7 @@ pub mod db;
 pub mod models;
 pub mod pgp;
 pub mod email;
+pub mod index;
 // pub mod suche;
 
 /// Kommandozeilenargumente
@@ -70,7 +71,17 @@ struct Args {
     /// Server-interne IP, auf der der Server erreichbar sein soll
     #[clap(short, long, default_value = "127.0.0.1")]
     ip: String,
-
+    
+    /// E-Mail-Host um Grundbuchblätter rauszusenden
+    #[clap(short, long, default_value = "")]
+    smtp_host: String,
+    /// E-Mail Konto, von dem Grundbuchblatt-Änderungen gesendet werden (SMTP)
+    #[clap(short, long, default_value = "")]
+    smtp_email: String,
+    /// Passwort für SMTP E-Mail Konto für Grundbuchänderungen
+    #[clap(short, long, default_value = "")]
+    smtp_passwort: String,
+    
     /// Befehl zum Bearbeiten der Datenbark (kein Befehl = Server startet)
     #[clap(subcommand)]
     action: Option<ArgAction>,
@@ -78,6 +89,8 @@ struct Args {
 
 #[derive(clap::Subcommand, Debug, PartialEq)]
 enum ArgAction {
+    /// Starte die Indexierung der Grundbuchblätter als neuen Prozess
+    StarteIndexierung,
     /// Neuen Benutzer anlegen (--name, --email, --passwort, --rechte)
     BenutzerNeu(BenutzerNeuArgs),
     /// Benutzer löschen (--email)
@@ -199,6 +212,7 @@ struct AboLoeschenArgs {
 fn process_action(action: &ArgAction) -> Result<(), String> {
     use self::ArgAction::*;
     match action {
+        StarteIndexierung => crate::index::index_all(),
         BenutzerNeu(BenutzerNeuArgs {
             name,
             email,
@@ -252,8 +266,16 @@ pub async fn startup_http_server(ip: &str, https: bool) -> std::io::Result<()> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    use crate::email::SmtpConfig;
+
     let args = Args::parse();
 
+    let _ = crate::email::init_email_config(SmtpConfig {
+        smtp_adresse: args.smtp_host.clone(),
+        email: args.smtp_email.clone(),
+        passwort: args.smtp_passwort.clone(),
+    });
+    
     if let Err(e) = crate::db::create_database() {
         println!("Fehler in create_database:\r\n{e}");
         return Ok(());

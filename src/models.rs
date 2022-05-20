@@ -3,6 +3,51 @@
 use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+
+pub fn get_db_path() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("benutzer.sqlite.db")
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+pub fn get_data_dir() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data")
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+pub fn get_keys_dir() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("keys")
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+pub fn get_index_dir() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("index")
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
 /// Entspricht einem PDF-Grundbuch
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfFile {

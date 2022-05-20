@@ -29,35 +29,6 @@ pub fn generate(user_id: &str) -> sequoia_openpgp::Result<sequoia_openpgp::Cert>
     Ok(cert)
 }
 
-/// Signs the given message.
-pub fn sign(p: &dyn Policy, sink: &mut (dyn Write + Send + Sync),
-        plaintext: &str, tsk: &sequoia_openpgp::Cert)
-           -> sequoia_openpgp::Result<()> {
-    // Get the keypair to do the signing from the Cert.
-    let keypair = tsk
-        .keys().unencrypted_secret()
-        .with_policy(p, None).supported().alive().revoked(false).for_signing()
-        .next().unwrap().key().clone().into_keypair()?;
-
-    // Start streaming an OpenPGP message.
-    let message = Message::new(sink);
-
-    // We want to sign a literal data packet.
-    let signer = Signer::new(message, keypair).build()?;
-
-    // Emit a literal data packet.
-    let mut literal_writer = LiteralWriter::new(signer).build()?;
-
-    // Sign the data.
-    literal_writer.write_all(plaintext.as_bytes())?;
-
-    // Finalize the OpenPGP message to make sure that all data is
-    // written.
-    literal_writer.finalize()?;
-
-    Ok(())
-}
-
 /// Verifies the given message.
 pub fn verify(p: &dyn Policy, sink: &mut dyn Write,
           signed_message: &[u8], sender: &sequoia_openpgp::Cert)
