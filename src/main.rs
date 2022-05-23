@@ -266,6 +266,9 @@ pub async fn startup_http_server(ip: &str, https: bool) -> std::io::Result<()> {
             .service(crate::api::download::download_gbx)
             .service(crate::api::download::dowload_pdf)
             .service(crate::api::upload::upload)
+            .service(crate::api::abo::abo_neu)
+            .service(crate::api::abo::abo_loeschen)
+
     })
     .bind((ip, if https { 5431 } else { 8080 }))?
     .run()

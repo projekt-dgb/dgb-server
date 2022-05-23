@@ -77,15 +77,15 @@ impl GenerateGrundbuchConfig {
 }
 
 pub struct PdfGrundbuchOptions {
-    exportiere_bv: bool,
-    exportiere_abt1: bool,
-    exportiere_abt2: bool,
-    exportiere_abt3: bool,
-    leere_seite_nach_titelblatt: bool,
-    mit_geroeteten_eintraegen: bool,
+    pub exportiere_bv: bool,
+    pub exportiere_abt1: bool,
+    pub exportiere_abt2: bool,
+    pub exportiere_abt3: bool,
+    pub leere_seite_nach_titelblatt: bool,
+    pub mit_geroeteten_eintraegen: bool,
 }
 
-struct PdfFonts {
+pub struct PdfFonts {
     times: IndirectFontRef,
     times_bold: IndirectFontRef,
     courier_bold: IndirectFontRef,
@@ -93,7 +93,7 @@ struct PdfFonts {
 }
 
 impl PdfFonts {
-    fn new(doc: &mut PdfDocumentReference) -> Self {
+    pub fn new(doc: &mut PdfDocumentReference) -> Self {
         Self {
             times_bold: doc.add_builtin_font(BuiltinFont::TimesBoldItalic).unwrap(),
             times: doc.add_builtin_font(BuiltinFont::TimesItalic).unwrap(),
@@ -277,7 +277,7 @@ fn export_grundbuch_multi_files(
 }
 
 
-fn write_titelblatt(
+pub fn write_titelblatt(
     current_layer: &mut PdfLayerReference, 
     fonts: &PdfFonts,
     titelblatt: &Titelblatt,
@@ -309,7 +309,7 @@ fn write_titelblatt(
     current_layer.use_text(&amtsgericht, 16.0, Mm(25.0), start - Mm(18.0), &fonts.times);
 }
 
-fn write_grundbuch(
+pub fn write_grundbuch(
     doc: &mut PdfDocumentReference, 
     grundbuch: &Grundbuch, 
     fonts: &PdfFonts,

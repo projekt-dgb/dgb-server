@@ -416,6 +416,8 @@ pub mod download {
     use serde_derive::{Deserialize, Serialize};
     use url_encoded_data::UrlEncodedData;
     use std::path::Path;
+    use crate::pdf::PdfGrundbuchOptions;
+    use crate::models::Grundbuch;
     
     #[derive(Debug, Clone, Deserialize, Serialize)]
     #[serde(tag = "status")]
@@ -437,6 +439,7 @@ pub mod download {
         path: web::Path<(String, String, usize)>,
         req: HttpRequest,
     ) -> impl Responder {
+        
         let _benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
             Err(e) => {
@@ -511,6 +514,7 @@ pub mod download {
         path: web::Path<(String, String, usize)>,
         req: HttpRequest,
     ) -> impl Responder {
+        
         let _benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
             Err(e) => {
@@ -528,17 +532,100 @@ pub mod download {
             }
         };
 
+        let (amtsgericht, grundbuch_von, blatt) = &*path;
+        let mut amtsgericht = amtsgericht.clone();
+        let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
+
+        let mut l = None;
+        for (land, ag, bezirk) in gemarkungen.iter() {
+            if (amtsgericht == "*" && bezirk == grundbuch_von) ||
+               (ag.as_str() == amtsgericht.as_str() && bezirk == grundbuch_von) {
+                amtsgericht = ag.clone();
+                l = Some(land.clone());
+                break;
+            }
+        }
+        
+        let land = match l {
+            Some(s) => s,
+            None => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(PdfFileNichtVorhanden {
+                    code: 1,
+                    text: format!("Ungültiges Amtsgericht oder ungültige Gemarkung: {amtsgericht}/{grundbuch_von}"),
+                })).unwrap_or_default());
+            }
+        };
+
+        let folder_path = get_data_dir();
+        let folder_path = Path::new(&folder_path);
+        
+        let file_path = folder_path
+                .join(land)
+                .join(amtsgericht)
+                .join(grundbuch_von)
+                .join(&format!("{grundbuch_von}_{blatt}.gbx"));
+            
+        let file: Option<PdfFile> = std::fs::read_to_string(&file_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok());
+
+    
+        let gbx = match file {
+            Some(s) => s,
+            None => {
+                return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(PdfFileNichtVorhanden {
+                    code: 404,
+                    text: format!("Datei für {grundbuch_von}_{blatt}.gbx nicht gefunden"),
+                })).unwrap_or_default());
+            }
+        };
+        
+        let options = PdfGrundbuchOptions {
+            exportiere_bv: true,
+            exportiere_abt1: true,
+            exportiere_abt2: true,
+            exportiere_abt3: true,
+            leere_seite_nach_titelblatt: true,
+            mit_geroeteten_eintraegen: true, // TODO
+        };
+        
+        let pdf_bytes = generate_pdf(&gbx.analysiert, &options);
+        
         HttpResponse::Ok()
             .content_type("application/pdf")
-            .body(generate_pdf())
+            .body(pdf_bytes)
     }
 
-    fn generate_pdf() -> Vec<u8> {
-        use printpdf::*;
-        let (doc, page1, layer1) =
-            PdfDocument::new("PDF_Document_title", Mm(247.0), Mm(210.0), "Layer 1");
-        let (page2, layer1) = doc.add_page(Mm(10.0), Mm(250.0), "Page 2, Layer 1");
-        doc.save_to_bytes().unwrap_or_default()
+    fn generate_pdf(gb: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<u8> {
+
+        use printpdf::Mm;
+        use crate::pdf::PdfFonts;
+        use crate::models::Grundbuch;
+        use printpdf::PdfDocument;
+        
+        let grundbuch_von = gb.titelblatt.grundbuch_von.clone();
+        let blatt = gb.titelblatt.blatt;
+        let amtsgericht = gb.titelblatt.amtsgericht.clone();
+
+        let titel = format!("{grundbuch_von} Blatt {blatt} (Amtsgericht {amtsgericht})");
+        let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Titelblatt");
+        let titelblatt = format!("{}_{}", gb.titelblatt.grundbuch_von, gb.titelblatt.blatt);
+        let fonts = PdfFonts::new(&mut doc);
+        
+        crate::pdf::write_titelblatt(&mut doc.get_page(page1).get_layer(layer1), &fonts, &gb.titelblatt);
+        if options.leere_seite_nach_titelblatt {
+            // Leere Seite 2
+            let (_, _) = doc.add_page(Mm(210.0), Mm(297.0), "Formular");
+        }
+        
+        crate::pdf::write_grundbuch(&mut doc, &gb, &fonts, &options);
+        
+        let bytes = doc.save_to_bytes().unwrap_or_default();
+        bytes
     }
 }
 
@@ -727,6 +814,8 @@ pub mod abo {
     #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}")]
     async fn abo_neu(tag: web::Path<(String, String, String, usize, String)>, req: HttpRequest) -> impl Responder {
         
+        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag) = &*tag;
+        
         let benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
             Err(e) => {
@@ -743,9 +832,7 @@ pub mod abo {
                     .body(json);
             }
         };
-    
-        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag) = &*tag;
-        
+            
         if let Err(e) = crate::db::create_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &benutzer.email, &tag) {
                 return HttpResponse::Ok()
                 .content_type("application/json")
