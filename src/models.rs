@@ -201,6 +201,192 @@ pub enum FlurstueckGroesse {
     },
 }
 
+impl FlurstueckGroesse {
+
+    pub fn get_m2(&self) -> u64 {
+        match self {
+            FlurstueckGroesse::Metrisch { m2 } => m2.unwrap_or(0),
+            FlurstueckGroesse::Hektar { ha, a, m2 } => ha.unwrap_or(0) * 100_000 + a.unwrap_or(0) * 100 + m2.unwrap_or(0),
+        }
+    }
+    
+    pub fn get_ha_string(&self) -> String {
+        let m2_string = format!("{}", self.get_m2());
+        let mut m2_string_chars: Vec<char> = m2_string.chars().collect();
+        for _ in 0..4 {
+            m2_string_chars.pop();
+        }
+        m2_string_chars.iter().collect()
+    }
+    
+    pub fn get_a_string(&self) -> String {
+        let m2_string = format!("{}", self.get_m2());
+        let mut m2_string_chars: Vec<char> = m2_string.chars().collect();
+        m2_string_chars.reverse();
+        for _ in 0..(m2_string_chars.len().saturating_sub(4)) {
+            m2_string_chars.pop();
+        }
+        m2_string_chars.reverse();
+        for _ in 0..2 {
+            m2_string_chars.pop();
+        }
+        m2_string_chars.iter().collect()
+    }
+    
+    pub fn get_m2_string(&self) -> String {
+        let m2_string = format!("{}", self.get_m2());
+        let mut m2_string_chars: Vec<char> = m2_string.chars().collect();
+        m2_string_chars.reverse();
+        for _ in 0..(m2_string_chars.len().saturating_sub(2)) {
+            m2_string_chars.pop();
+        }
+        m2_string_chars.reverse();
+        let fi: String = m2_string_chars.iter().collect();
+        if fi.is_empty() { format!("0") } else { fi }
+    }
+}
+
+impl StringOrLines {
+    pub fn text(&self) -> String {
+        self.lines().join("\r\n")
+    }
+    
+    pub fn text_clean(&self) -> String {
+        crate::pdf::unhyphenate(&self.lines().join("\r\n"))
+    }
+    
+    pub fn lines(&self) -> Vec<String> {
+        match self {
+            StringOrLines::SingleLine(s) => s.lines().map(|s| s.to_string()).collect(),
+            StringOrLines::MultiLine(ml) => ml.clone(),
+        }
+    }
+}
+
+impl BvEintrag {
+    pub fn ist_geroetet(&self) -> bool {
+        match self {
+            BvEintrag::Flurstueck(flst) => {
+                flst.manuell_geroetet.unwrap_or(flst.automatisch_geroetet.unwrap_or(false))
+            },
+            BvEintrag::Recht(recht) => {
+                recht.manuell_geroetet.unwrap_or(recht.automatisch_geroetet.unwrap_or(false))
+            }
+        }
+    }
+}
+
+impl BvZuschreibung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl BvAbschreibung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt1GrundEintragung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt1EintragV1 {
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt1EintragV2 {
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt1Eintrag {
+
+    pub fn get_lfd_nr(&self) -> usize {
+        match self {
+            Abt1Eintrag::V1(v1) => { v1.lfd_nr },
+            Abt1Eintrag::V2(v2) => { v2.lfd_nr },
+        }
+    }
+    
+    pub fn get_eigentuemer(&self) -> StringOrLines {
+        match self {
+            Abt1Eintrag::V1(v1) => { v1.eigentuemer.clone() },
+            Abt1Eintrag::V2(v2) =>{ v2.eigentuemer.clone() },
+        }
+    }
+    
+    pub fn ist_geroetet(&self) -> bool {
+        match self {
+            Abt1Eintrag::V1(v1) => v1.ist_geroetet(),
+            Abt1Eintrag::V2(v2) => v2.ist_geroetet(),
+        }
+    }
+}
+
+impl Abt1Veraenderung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt1Loeschung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt2Eintrag {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt2Veraenderung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt2Loeschung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt3Eintrag {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt3Veraenderung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl Abt3Loeschung {
+    pub fn ist_geroetet(&self) -> bool { 
+        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+    }
+}
+
+impl From<StringOrLines> for String {
+    fn from(s: StringOrLines) -> String {
+        match s {
+            StringOrLines::SingleLine(s) => s,
+            StringOrLines::MultiLine(ml) => ml.join("\r\n"),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct BvZuschreibung {
     pub bv_nr: StringOrLines,

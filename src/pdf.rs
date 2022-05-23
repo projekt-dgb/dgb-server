@@ -1,4 +1,4 @@
-use crate::{Titelblatt, Grundbuch, Abt2Eintrag, Abt3Eintrag, BvEintrag};
+use crate::models::{Titelblatt, BvEintrag, Grundbuch, Abt2Eintrag, Abt3Eintrag};
 use printpdf::{
     BuiltinFont, PdfDocument, Mm, IndirectFontRef,
     PdfDocumentReference, PdfLayerReference,
@@ -6,6 +6,9 @@ use printpdf::{
 };
 use std::path::Path;
 use std::collections::BTreeMap;
+use hyphenation::{Language, Load, Standard};
+use textwrap::{Options, WordSplitter};
+use regex::Regex;
 
 pub struct GrundbuchExportConfig {
     pub exportiere: PdfExportTyp,
@@ -103,7 +106,8 @@ impl PdfFonts {
 pub fn export_grundbuch(config: GrundbuchExportConfig) -> Result<(), String> {
     match config.optionen {
         GenerateGrundbuchConfig::EinzelneDatei { ref datei, ..  } => {
-            export_grundbuch_single_file(config.optionen.get_options(), &config.exportiere, datei.clone())
+            let datei = if datei.ends_with(".pdf") { datei.clone() } else { format!("{datei}.pdf") };
+            export_grundbuch_single_file(config.optionen.get_options(), &config.exportiere, datei)
         },
         GenerateGrundbuchConfig::MehrereDateien { ref ordner, ..  } => {
             export_grundbuch_multi_files(config.optionen.get_options(), &config.exportiere, ordner.clone())
@@ -114,18 +118,39 @@ pub fn export_grundbuch(config: GrundbuchExportConfig) -> Result<(), String> {
 fn export_grundbuch_single_file(options: PdfGrundbuchOptions, source: &PdfExportTyp, datei: String) -> Result<(), String> {
     match source {
         PdfExportTyp::AlleOriginalPdf(gb) => {
-            let mut files = Vec::new();
+            use std::process::Command;
+
+            // qpdf --empty --pages *.pdf -- out.pdf
+            if Command::new("qpdf").arg("--version").status().is_ok() {                
+                let mut command = Command::new("qpdf");
+                
+                command.arg("--empty");
+                command.arg("--pages");
+                
+                for d in gb {
+                    command.arg(d);
+                }
+                
+                command
+                .arg("--")
+                .arg(datei)
+                .status()
+                .map_err(|e| format!("Fehler beim PDF-Export: {e}"))?;
+                
+            } else {
+                let mut files = Vec::new();
             
-            for d in gb {
-                let bytes = std::fs::read(&d).map_err(|e| format!("Fehler: {}: {}", d, e))?;
-                let document = lopdf::Document::load_mem(&bytes).map_err(|e| format!("Fehler: {}: {}", d, e))?;
-                files.push(document);
+                for d in gb {
+                    let bytes = std::fs::read(&d).map_err(|e| format!("Fehler: {}: {}", d, e))?;
+                    let document = lopdf::Document::load_mem(&bytes).map_err(|e| format!("Fehler: {}: {}", d, e))?;
+                    files.push(document);
+                }
+                
+                let merged = merge_pdf_files(files).map_err(|e| format!("Fehler: {}: {}", datei, e))?;
+                
+                let _ = std::fs::write(Path::new(&datei), &merged)
+                .map_err(|e| format!("Fehler: {}: {}", datei, e))?;
             }
-            
-            let merged = merge_pdf_files(files).map_err(|e| format!("Fehler: {}: {}", datei, e))?;
-            
-            let _ = std::fs::write(Path::new(&datei), &merged)
-            .map_err(|e| format!("Fehler: {}: {}", datei, e))?;
         },
         PdfExportTyp::OffenesGrundbuch(gb) => {
             
@@ -309,6 +334,7 @@ pub struct PdfTextRow {
     pub geroetet: Geroetet,
     pub teil_geroetet: BTreeMap<usize, String>,
     pub force_single_line: Vec<usize>,
+    pub hvm_exception: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -337,6 +363,7 @@ const EXTENT_PER_LINE: f32 = 3.53;
 const EXTENT_PER_LINE_X: f32 = 2.2;
 const RED: Cmyk = Cmyk { c: 0.0, m: 0.7, y: 0.4, k: 0.0, icc_profile: None };
 const BLACK: Cmyk = Cmyk { c: 0.0, m: 0.0, y: 0.0, k: 1.0, icc_profile: None };
+const WHITE: Cmyk = Cmyk { c: 0.0, m: 0.0, y: 0.0, k: 0.0, icc_profile: None };
 
 impl PdfTextRow {
     
@@ -356,6 +383,7 @@ impl PdfTextRow {
         .map(|s| (s * 1000.0).round() as usize)
         .max()
         .unwrap_or(0) as f32 / 1000.0_f32
+        + if self.hvm_exception { 5.0 } else { 0.0 }
     }
     
     fn add_to_page(&self, layer: &mut PdfLayerReference, fonts: &PdfFonts, y_start: f32) {
@@ -369,10 +397,28 @@ impl PdfTextRow {
         layer.set_line_height(10.0);
 
         let max_width_mm = self.header.get_max_width_mm();
-        
+        let self_height = self.get_height_mm();
         let x_start_mm = self.header.get_starting_x_spalte_mm(0);
-        
         let col_id_half = self.texts.len() / 2;
+        
+        if self.hvm_exception {
+            layer.save_graphics_state();
+            layer.set_outline_thickness(0.75);
+            layer.set_fill_color(Color::Cmyk(WHITE));
+            layer.add_shape(Line {
+                points: vec![
+                    (Point::new(Mm(x_start_mm as f64), Mm(y_start as f64)), false),
+                    (Point::new(Mm(x_start_mm as f64), Mm(y_start as f64 - self_height as f64)), false),
+                    (Point::new(Mm(x_start_mm as f64 + max_width_mm as f64), Mm(y_start as f64 - self_height as f64)), false),
+                    (Point::new(Mm(x_start_mm as f64 + max_width_mm as f64), Mm(y_start as f64 - self_height as f64)), false)
+                ],
+                is_closed: true,
+                has_fill: true,
+                has_stroke: true,
+                is_clipping_path: false,
+            });
+            layer.restore_graphics_state();
+        }
         
         for (col_id, text) in self.texts.iter().enumerate() {
             
@@ -391,7 +437,7 @@ impl PdfTextRow {
             layer.begin_text_section();
             layer.set_text_cursor(
                 Mm((self.header.get_starting_x_spalte_mm(col_id) + 1.0) as f64),
-                Mm(y_start as f64),
+                Mm(y_start as f64 + if self.hvm_exception { 5.0 } else { 0.0 }),
             );
             
             if self.force_single_line.contains(&col_id) {
@@ -2623,7 +2669,6 @@ impl PdfHeader {
         layer.restore_graphics_state();
     }
     
-    
     pub fn add_columns_to_page(&self, layer: &mut PdfLayerReference) {
         
         layer.save_graphics_state();
@@ -2637,7 +2682,10 @@ impl PdfHeader {
     }
 }
 
-fn get_text_rows(grundbuch: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<PdfTextRow> {
+fn get_text_rows(
+    grundbuch: &Grundbuch, 
+    options: &PdfGrundbuchOptions
+) -> Vec<PdfTextRow> {
     
     let mut rows = Vec::new();
     let mit_geroeteten_eintraegen = options.mit_geroeteten_eintraegen;
@@ -2646,6 +2694,7 @@ fn get_text_rows(grundbuch: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<Pd
     if options.exportiere_bv {
         
         for bv in grundbuch.bestandsverzeichnis.eintraege.iter() {
+            if !mit_geroeteten_eintraegen && bv.ist_geroetet() { continue; }
             match bv {
                 BvEintrag::Flurstueck(flst) => {
                     let ha_string = flst.groesse.get_ha_string();
@@ -2666,81 +2715,162 @@ fn get_text_rows(grundbuch: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<Pd
                         header: PdfHeader::Bestandsverzeichnis,
                         geroetet: Geroetet::Ganz(bv.ist_geroetet()),
                         teil_geroetet: BTreeMap::new(),
-                        force_single_line: vec![6]
+                        force_single_line: vec![6],
+                        hvm_exception: false,
                     });
                 },
                 BvEintrag::Recht(hvm) => {
+                    rows.push(PdfTextRow {
+                        texts: vec![
+                            format!("{}", hvm.lfd_nr),
+                            hvm.bisherige_lfd_nr.clone().map(|b| format!("{}", b)).unwrap_or_default(),
+                            hvm.zu_nr.clone().into(),
+                            hvm.text.clone().into(),
+                        ],
+                        header: PdfHeader::Bestandsverzeichnis,
+                        geroetet: Geroetet::Ganz(bv.ist_geroetet()),
+                        teil_geroetet: BTreeMap::new(),
+                        force_single_line: vec![6],
+                        hvm_exception: true,
+                    });
                 }
             }
         }
         
-        let zu_ab_len = grundbuch.bestandsverzeichnis.zuschreibungen.len().max(grundbuch.bestandsverzeichnis.abschreibungen.len());
+        let zuschreibungen = if !mit_geroeteten_eintraegen { 
+            grundbuch.bestandsverzeichnis.zuschreibungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.bestandsverzeichnis.zuschreibungen.clone()
+        };
+        
+        let abschreibungen = if !mit_geroeteten_eintraegen {
+            grundbuch.bestandsverzeichnis.abschreibungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.bestandsverzeichnis.abschreibungen.clone()
+        };
+        
+        let zu_ab_len = zuschreibungen.len().max(abschreibungen.len());
         
         for i in 0..zu_ab_len {
-            
             rows.push(PdfTextRow {
                 texts: vec![
-                    grundbuch.bestandsverzeichnis.zuschreibungen.get(i).map(|bvz| bvz.bv_nr.text()).unwrap_or_default(),
-                    grundbuch.bestandsverzeichnis.zuschreibungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
-                    grundbuch.bestandsverzeichnis.abschreibungen.get(i).map(|bvz| bvz.bv_nr.text()).unwrap_or_default(),
-                    grundbuch.bestandsverzeichnis.abschreibungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    zuschreibungen.get(i).map(|bvz| bvz.bv_nr.text()).unwrap_or_default(),
+                    zuschreibungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    abschreibungen.get(i).map(|bvz| bvz.bv_nr.text()).unwrap_or_default(),
+                    abschreibungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
                 ],
                 header: PdfHeader::BestandsverzeichnisZuAb,
                 geroetet: Geroetet::HalbHalb(
-                    grundbuch.bestandsverzeichnis.zuschreibungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
-                    grundbuch.bestandsverzeichnis.abschreibungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    zuschreibungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    abschreibungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
     }
     
     if options.exportiere_abt1 {
 
-        let zu_ab_len = grundbuch.abt1.eintraege.len().max(grundbuch.abt1.grundlagen_eintragungen.len());
+        let eintraege = if !mit_geroeteten_eintraegen {
+            grundbuch.abt1.eintraege
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt1.eintraege.clone()
+        };
+        
+        let grundlagen_eintragungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt1.grundlagen_eintragungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt1.grundlagen_eintragungen.clone()
+        };
+        
+        let zu_ab_len = eintraege.len().max(grundlagen_eintragungen.len());
         
         for i in 0..zu_ab_len {
             rows.push(PdfTextRow {
                 texts: vec![
-                    grundbuch.abt1.eintraege.get(i).map(|bvz| format!("{}", bvz.get_lfd_nr())).unwrap_or_default(),
-                    grundbuch.abt1.eintraege.get(i).map(|bvz| bvz.get_eigentuemer()).unwrap_or_default(),
-                    grundbuch.abt1.grundlagen_eintragungen.get(i).map(|bvz| bvz.bv_nr.text()).unwrap_or_default(),
-                    grundbuch.abt1.grundlagen_eintragungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    eintraege.get(i).map(|bvz| format!("{}", bvz.get_lfd_nr())).unwrap_or_default(),
+                    eintraege.get(i).map(|bvz| bvz.get_eigentuemer().text()).unwrap_or_default(),
+                    grundlagen_eintragungen.get(i).map(|bvz| bvz.bv_nr.text()).unwrap_or_default(),
+                    grundlagen_eintragungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
                 ],
                 header: PdfHeader::Abteilung1,
                 geroetet: Geroetet::HalbHalb(
-                    grundbuch.abt1.eintraege.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
-                    grundbuch.abt1.grundlagen_eintragungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    eintraege.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    grundlagen_eintragungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
         
-        let zu_ab_len = grundbuch.abt1.veraenderungen.len().max(grundbuch.abt1.loeschungen.len());
+        
+        let veraenderungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt1.veraenderungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt1.veraenderungen.clone()
+        };
+        
+        let loeschungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt1.loeschungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt1.loeschungen.clone()
+        };
+        
+        let zu_ab_len = veraenderungen.len().max(loeschungen.len());
         
         for i in 0..zu_ab_len {
             rows.push(PdfTextRow {
                 texts: vec![
-                    grundbuch.abt1.veraenderungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
-                    grundbuch.abt1.veraenderungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
-                    grundbuch.abt1.loeschungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
-                    grundbuch.abt1.loeschungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
                 ],
                 header: PdfHeader::Abteilung1ZuAb,
                 geroetet: Geroetet::HalbHalb(
-                    grundbuch.abt1.veraenderungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
-                    grundbuch.abt1.loeschungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
     }
     
     if options.exportiere_abt2 {
+    
         for abt2 in grundbuch.abt2.eintraege.iter() {
+            
+            if !mit_geroeteten_eintraegen && abt2.ist_geroetet() { continue; }
+            
             rows.push(PdfTextRow {
                 texts: vec![
                     format!("{}", abt2.lfd_nr),
@@ -2750,33 +2880,58 @@ fn get_text_rows(grundbuch: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<Pd
                 header: PdfHeader::Abteilung2,
                 geroetet: Geroetet::Ganz(abt2.ist_geroetet()),
                 teil_geroetet: BTreeMap::new(),
-                force_single_line: Vec::new()
+                force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
         
-        let zu_ab_len = grundbuch.abt2.veraenderungen.len().max(grundbuch.abt2.loeschungen.len());
+        let veraenderungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt2.veraenderungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt2.veraenderungen.clone()
+        };
+        
+        let loeschungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt2.loeschungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt2.loeschungen.clone()
+        };
+        
+        let zu_ab_len = veraenderungen.len().max(loeschungen.len());
         
         for i in 0..zu_ab_len {
             rows.push(PdfTextRow {
                 texts: vec![
-                    grundbuch.abt2.veraenderungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
-                    grundbuch.abt2.veraenderungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
-                    grundbuch.abt2.loeschungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
-                    grundbuch.abt2.loeschungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
                 ],
                 header: PdfHeader::Abteilung2ZuAb,
                 geroetet: Geroetet::HalbHalb(
-                    grundbuch.abt2.veraenderungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
-                    grundbuch.abt2.loeschungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
     }
     
     if options.exportiere_abt3 {
         for abt3 in grundbuch.abt3.eintraege.iter() {
+            
+            if !mit_geroeteten_eintraegen && abt3.ist_geroetet() { continue; }
+
             rows.push(PdfTextRow {
                 texts: vec![
                     format!("{}", abt3.lfd_nr),
@@ -2787,27 +2942,49 @@ fn get_text_rows(grundbuch: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<Pd
                 header: PdfHeader::Abteilung3,
                 geroetet: Geroetet::Ganz(abt3.ist_geroetet()),
                 teil_geroetet: BTreeMap::new(),
-                force_single_line: Vec::new()
+                force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
         
-        let zu_ab_len = grundbuch.abt3.veraenderungen.len().max(grundbuch.abt3.loeschungen.len());
+        let veraenderungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt3.veraenderungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt3.veraenderungen.clone()
+        };
+        
+        let loeschungen = if !mit_geroeteten_eintraegen {
+            grundbuch.abt3.loeschungen
+            .iter()
+            .filter(|bvz| !bvz.ist_geroetet())
+            .cloned()
+            .collect()
+        } else {
+            grundbuch.abt3.loeschungen.clone()
+        };
+        
+        let zu_ab_len = veraenderungen.len().max(loeschungen.len());
         
         for i in 0..zu_ab_len {
             rows.push(PdfTextRow {
                 texts: vec![
-                    grundbuch.abt3.veraenderungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
-                    grundbuch.abt3.veraenderungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
-                    grundbuch.abt3.loeschungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
-                    grundbuch.abt3.loeschungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.lfd_nr.text()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.text.text()).unwrap_or_default(),
                 ],
                 header: PdfHeader::Abteilung3ZuAb,
                 geroetet: Geroetet::HalbHalb(
-                    grundbuch.abt3.veraenderungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
-                    grundbuch.abt3.loeschungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    veraenderungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
+                    loeschungen.get(i).map(|bvz| bvz.ist_geroetet()).unwrap_or_default(),
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
+                hvm_exception: false,
             });
         }
     }
@@ -3011,91 +3188,51 @@ fn merge_pdf_files(documents: Vec<lopdf::Document>) -> Result<Vec<u8>, String> {
 
 // Format a string so that it fits into N characters per line
 fn wordbreak_text(s: &str, max_cols: usize) -> String {
-    
-    let mut lines = s.lines()
-    .map(|l| l.split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>())
-    .collect::<Vec<_>>();
-    
-    let mut output = String::new();
-    
-    for words in lines {
-        let mut line_len = 0;
+    hyphenate(&unhyphenate(s), max_cols).join("\r\n")
+}
 
-        for w in words {
-            
-            let word_len = w.chars().count() + 1;
-            let (before, after) = split_hyphenate(&w, max_cols.saturating_sub(line_len).saturating_sub(1));
-            
-            if !before.is_empty() {
-               if !after.is_empty() {
-                    output.push_str(&before);
-                    output.push_str("-\r\n");
-                    output.push_str(&after);
-                    output.push_str(" ");
-                    line_len = after.chars().count() + 1;
-                } else {
-                    output.push_str(&before);
-                    output.push_str(" ");
-                    line_len += before.chars().count() + 1;
-                }
-            } else if !after.is_empty() {
-                output.push_str("\r\n");
-                output.push_str(&after);
-                output.push_str(" ");
-                line_len = after.chars().count() + 1;
+lazy_static::lazy_static! {
+    static ref DICT_DE: hyphenation::Standard = Standard::from_embedded(Language::German1996).unwrap();
+    static ref REGEX_UNHYPHENATE: Regex = {
+        regex::RegexBuilder::new("(.*)-\\s([a-züäö])(.*)")
+                .multi_line(true)
+                .case_insensitive(false)
+                .build().unwrap()
+    };
+}
+
+pub fn unhyphenate(text: &str) -> String {
+
+    let mut und_saetze = text.lines().map(|s| {
+        s.split("- und ")
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+    }).collect::<Vec<_>>();
+    
+    let mut text_sauber = String::new();
+    
+    for l in und_saetze.into_iter() {
+        let und_len = l.len();
+        for (index, mut s) in l.into_iter().enumerate() {
+            while REGEX_UNHYPHENATE.is_match(&s) {
+                s = REGEX_UNHYPHENATE.replace_all(&s, "$1$2$3").to_string();
+            }
+            text_sauber.push_str(&s);
+            if index +1 != und_len {
+                text_sauber.push_str("- und ");
             }
         }
-        
-        output.push_str("\r\n");
     }
-        
-    output.trim().to_string()
+    
+    text_sauber
 }
 
-fn split_hyphenate(word: &str, remaining: usize) -> (String, String) {
+pub fn hyphenate(text: &str, wrap_at_chars: usize) -> Vec<String> {
+    let options = Options::new(wrap_at_chars)
+        .word_splitter(WordSplitter::Hyphenation(DICT_DE.clone()));
     
-    if remaining == 0 {
-        return (String::new(), word.to_string());
-    }
-    
-    let mut before = String::new();
-    let mut after = String::new();
-    let mut counter = 0;
-    
-    for syllable in get_syllables(word) {
-        let syllable_len = syllable.chars().count();
-        if counter + syllable_len > remaining {
-            after.push_str(&syllable);
-        } else {
-            before.push_str(&syllable);
-        }
-        counter += syllable_len;
-    }
-    
-    (before, after)
-}
-
-fn get_syllables(s: &str) -> Vec<String> {
-    let vocals = ['a', 'e', 'i', 'o', 'u', 'ö', 'ä', 'ü', 'y'];
-    let vocals2 = ['a', 'e', 'i', 'o', 'u', 'y'];
-
-    let mut results = Vec::new();
-    let chars = s.chars().collect::<Vec<_>>();
-    let mut current_position = chars.len() - 1;
-    let mut last_split = 0;
-    for i in 0..current_position {
-        if i != 0 && 
-            vocals.contains(&chars[i]) && 
-            !vocals2.contains(&chars[i - 1]) && 
-            i - last_split > 1 {
-            let a = &chars[last_split..i];
-            let b = &chars[i..];
-            last_split = i;
-            results.push(a.iter().collect::<String>());
-        }
-    }
-    
-    results.push((&chars[last_split..]).iter().collect::<String>());
-    
-    results
+    textwrap::wrap(text, &options)
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect()
 }

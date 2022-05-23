@@ -2,6 +2,7 @@
 pub mod upload {
 
     use crate::models::{AuthFormData, PdfFile, BenutzerInfo, get_data_dir};
+    use crate::db::GemarkungsBezirke;
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
     use std::collections::{BTreeMap, BTreeSet};
@@ -109,8 +110,6 @@ pub mod upload {
         };
 
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
-
-        println!("gemarkungen: {:?}", gemarkungen);
         
         for neu in upload_changeset.data.neu.iter() {
         
@@ -208,7 +207,7 @@ pub mod upload {
         let server_url = "https://127.0.0.1"; // TODO
         
         if !check.geaendert.is_empty() || !check.neu.is_empty() {
-            if let Err(e) = commit_changes(&server_url, &folder_path.to_path_buf(), &benutzer, &upload_changeset).await {
+            if let Err(e) = commit_changes(&gemarkungen, &server_url, &folder_path.to_path_buf(), &benutzer, &upload_changeset).await {
                 return HttpResponse::Ok()
                 .content_type("application/json")
                 .body(
@@ -283,6 +282,7 @@ pub mod upload {
     }
     
     async fn commit_changes(
+        gemarkungen: &GemarkungsBezirke,
         server_url: &str, 
         folder_path: &PathBuf, 
         benutzer: &BenutzerInfo, 
@@ -337,7 +337,56 @@ pub mod upload {
             })
             .collect::<BTreeSet<_>>();
         
+        let (grundbuch_schema, grundbuch_index) = crate::index::get_grundbuch_index()
+        .map_err(|e| format!("Fehler in Index / Schema \"grundbuch\": {e}"))?;
+        
+        let mut index_writer = grundbuch_index.writer(10_000_000)
+        .map_err(|e| format!("Fehler bei Allokation von 10MB für Schema \"grundbuch\": {e}"))?;
 
+        for blatt in upload_changeset.data.neu.iter() {
+                    
+            let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
+                if *ag == blatt.titelblatt.amtsgericht && 
+                   *bezirk == blatt.titelblatt.grundbuch_von { 
+                    Some(land.clone()) 
+                } else { 
+                    None 
+                }
+            });
+
+            let land = land.ok_or(format!(
+                "Kein Land für Grundbuch {}_{}.gbx gefunden", 
+                blatt.titelblatt.grundbuch_von, 
+                blatt.titelblatt.blatt
+            ))?;
+                
+            crate::index::add_grundbuchblatt_zu_index(&land, blatt, &index_writer, &grundbuch_schema)?;
+        }
+            
+        for blatt in upload_changeset.data.geaendert.iter() {
+            
+            let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
+                if *ag == blatt.neu.titelblatt.amtsgericht && 
+                *bezirk == blatt.neu.titelblatt.grundbuch_von { 
+                    Some(land.clone()) 
+                } else { 
+                    None 
+                }
+            });
+
+            let land = land.ok_or(format!(
+                "Kein Land für Grundbuch {}_{}.gbx gefunden", 
+                blatt.neu.titelblatt.grundbuch_von, 
+                blatt.neu.titelblatt.blatt
+            ))?;
+            
+
+            crate::index::add_grundbuchblatt_zu_index(&land, &blatt.neu, &index_writer, &grundbuch_schema)?;
+        }
+        
+        let _ = index_writer.commit()
+            .map_err(|e| format!("Fehler bei index.commit(): {e}"))?;
+        
         for blatt in geaendert_blaetter {            
             
             let webhook_abos = crate::db::get_webhook_abos(&blatt, &commit_id)

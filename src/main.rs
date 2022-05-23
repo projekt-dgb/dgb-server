@@ -58,7 +58,8 @@ pub mod models;
 pub mod pgp;
 pub mod email;
 pub mod index;
-// pub mod suche;
+pub mod pdf;
+pub mod suche;
 
 /// Kommandozeilenargumente
 #[derive(clap::Parser, Debug)]
@@ -91,6 +92,8 @@ struct Args {
 enum ArgAction {
     /// Starte die Indexierung der Grundbuchblätter als neuen Prozess
     StarteIndexierung,
+    /// Suche nach Suchbegriff in momentan vorhandenem Index
+    Suche { begriff: String },
     /// Neuen Benutzer anlegen (--name, --email, --passwort, --rechte)
     BenutzerNeu(BenutzerNeuArgs),
     /// Benutzer löschen (--email)
@@ -213,6 +216,11 @@ fn process_action(action: &ArgAction) -> Result<(), String> {
     use self::ArgAction::*;
     match action {
         StarteIndexierung => crate::index::index_all(),
+        Suche { begriff } => {
+            let suchergebnisse = crate::suche::suche_in_index(&begriff)?;
+            println!("{:#?}", suchergebnisse);
+            Ok(())
+        },
         BenutzerNeu(BenutzerNeuArgs {
             name,
             email,
