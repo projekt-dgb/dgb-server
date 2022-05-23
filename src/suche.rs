@@ -2,21 +2,22 @@
 
 use serde_derive::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SuchErgebnisse {
     pub grundbuecher: Vec<SuchErgebnisGrundbuch>,
     pub aenderungen: Vec<SuchErgebnisAenderung>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SuchErgebnisAenderung {
     pub aenderungs_id: String,
     pub bearbeiter: String,
     pub datum: String,
-    pub text: String,
+    pub titel: String,
+    pub beschreibung: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SuchErgebnisGrundbuch {
     pub land: String,
     pub amtsgericht: String,
@@ -58,7 +59,7 @@ pub fn suche_in_index(s: &str) -> Result<SuchErgebnisse, String> {
         .map_err(|e| format!("Fehler in Suchbegriff: {e}"))?;
 
     let top_docs: Vec<(Score, DocAddress)> = 
-        searcher.search(&query, &TopDocs::with_limit(10))
+        searcher.search(&query, &TopDocs::with_limit(50))
         .map_err(|e| format!("Suche fehlgeschlagen: {e}"))?;
     
     let mut grundbuecher = Vec::new();

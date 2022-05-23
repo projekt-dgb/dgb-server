@@ -43,7 +43,7 @@ pub struct AboWebhookInfo {
     pub commit_id: String,
 }
 
-pub fn send_change_email(server_url: &str, abo: &AbonnementInfo) -> Result<(), String> {
+pub fn send_change_email(server_url: &str, abo: &AbonnementInfo, commit_id: &str) -> Result<(), String> {
     
     use lettre::transport::smtp::PoolConfig;
     use lettre::transport::smtp::SmtpTransportBuilder;
@@ -56,7 +56,6 @@ pub fn send_change_email(server_url: &str, abo: &AbonnementInfo) -> Result<(), S
         text,
         grundbuchbezirk,
         aktenzeichen,
-        commit_id,
     } = abo;
     
     let email = text;
@@ -161,7 +160,7 @@ Um das Abonnement zu kündigen, klicken Sie bitte hier:
     Ok(())
 }
 
-pub async fn send_change_webhook(server_url: &str, abo: &AbonnementInfo) -> Result<(), String> {
+pub async fn send_change_webhook(server_url: &str, abo: &AbonnementInfo, commit_id: &str) -> Result<(), String> {
     
     let abo_info = AboWebhookInfo {
         server_url: server_url.to_string(),
@@ -170,7 +169,7 @@ pub async fn send_change_webhook(server_url: &str, abo: &AbonnementInfo) -> Resu
         blatt: abo.blatt.clone(),
         webhook: abo.text.clone(),
         aktenzeichen: abo.aktenzeichen.clone(),
-        commit_id: abo.commit_id.clone(),
+        commit_id: commit_id.to_string(),
     };
 
     let client = reqwest::Client::new();

@@ -717,12 +717,11 @@ pub struct BenutzerInfo {
     pub email: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AbonnementInfo {
     pub amtsgericht: String,
     pub grundbuchbezirk: String,
     pub blatt: i32,
     pub text: String,
     pub aktenzeichen: String,
-    pub commit_id: String,
 }

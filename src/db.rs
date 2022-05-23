@@ -408,14 +408,6 @@ pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Res
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-        /*
-            typ              VARCHAR(50) NOT NULL,
-            text             VARCHAR(1023) NOT NULL,
-            amtsgericht      VARCHAR(255) NOT NULL,
-            bezirk           VARCHAR(255) NOT NULL,
-            blatt            INTEGER NOT NULL,
-            aktenzeichen     VARCHAR(1023) NOT NULL
-        */
     conn.execute(
         "INSERT INTO abonnements (typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![typ, text, amtsgericht, bezirk, b, aktenzeichen],
@@ -424,15 +416,53 @@ pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Res
     Ok(())
 }
 
-pub fn get_email_abos(blatt: &str, commit_id: &str) -> Result<Vec<AbonnementInfo>, String> {
-    get_abos_inner("email", blatt, commit_id)
+pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementInfo>, String> {
+    
+    let conn = Connection::open(get_db_path())
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+        
+    let mut stmt = conn
+        .prepare("SELECT typ, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE text = ?1")
+        .map_err(|e| format!("Fehler beim Auslesen der Abonnements"))?;
+              
+    let abos = stmt
+        .query_map(rusqlite::params![benutzer.email], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+                row.get::<usize, String>(1)?,
+                row.get::<usize, String>(2)?,
+                row.get::<usize, i32>(3)?,
+                row.get::<usize, String>(4)?
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut bz = Vec::new();
+    
+    for a in abos {
+        if let Ok((typ, amtsgericht, bezirk, blatt, aktenzeichen)) = a {
+            bz.push(AbonnementInfo {
+                amtsgericht: amtsgericht.clone(),
+                grundbuchbezirk: bezirk.clone(),
+                blatt: blatt,
+                text: benutzer.email.to_string(),
+                aktenzeichen: aktenzeichen.to_string(),
+            });
+        }
+    }
+    
+    Ok(bz)
 }
 
-pub fn get_webhook_abos(blatt: &str, commit_id: &str) -> Result<Vec<AbonnementInfo>, String> {
-    get_abos_inner("webhook", blatt, commit_id)
+pub fn get_email_abos(blatt: &str) -> Result<Vec<AbonnementInfo>, String> {
+    get_abos_inner("email", blatt)
 }
 
-fn get_abos_inner(typ: &'static str, blatt: &str, commit_id: &str) -> Result<Vec<AbonnementInfo>, String> {
+pub fn get_webhook_abos(blatt: &str) -> Result<Vec<AbonnementInfo>, String> {
+    get_abos_inner("webhook", blatt)
+}
+
+fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>, String> {
     
     let blatt_split = blatt
         .split("/")
@@ -469,9 +499,7 @@ fn get_abos_inner(typ: &'static str, blatt: &str, commit_id: &str) -> Result<Vec
     let mut stmt = conn
         .prepare("SELECT text, aktenzeichen FROM abonnements WHERE typ = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4")
         .map_err(|e| format!("Fehler beim Auslesen der Bezirke"))?;
-    
-    println!("get_abos_inner: {typ}, {amtsgericht}, {bezirk}, {blatt}");
-    
+        
     let abos = stmt
         .query_map(rusqlite::params![typ, amtsgericht, bezirk, b], |row| {
             Ok((
@@ -491,7 +519,6 @@ fn get_abos_inner(typ: &'static str, blatt: &str, commit_id: &str) -> Result<Vec
                 blatt: b.clone(),
                 text: email.to_string(),
                 aktenzeichen: aktenzeichen.to_string(),
-                commit_id: commit_id.to_string(),
             });
         }
     }

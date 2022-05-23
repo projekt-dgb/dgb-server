@@ -389,18 +389,18 @@ pub mod upload {
         
         for blatt in geaendert_blaetter {            
             
-            let webhook_abos = crate::db::get_webhook_abos(&blatt, &commit_id)
+            let webhook_abos = crate::db::get_webhook_abos(&blatt)
                 .map_err(|e| format!("{e}"))?;
             
             for abo_info in webhook_abos {
-                let _ = crate::email::send_change_webhook(server_url, &abo_info).await;
+                let _ = crate::email::send_change_webhook(server_url, &abo_info, &commit_id).await;
             }
             
-            let email_abos = crate::db::get_email_abos(&blatt, &commit_id)
+            let email_abos = crate::db::get_email_abos(&blatt)
                 .map_err(|e| format!("{e}"))?;
             
             for abo_info in email_abos {
-                let _ = crate::email::send_change_email(server_url, &abo_info);
+                let _ = crate::email::send_change_email(server_url, &abo_info, &commit_id);
             }
         }
                 
@@ -545,13 +545,14 @@ pub mod download {
 /// API für `/suche` Anfragen
 pub mod suche {
 
-    use crate::models::{AuthFormData, PdfFile, Titelblatt, get_data_dir};
+    use crate::models::{AuthFormData, AbonnementInfo, PdfFile, Titelblatt, get_data_dir};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use regex::Regex;
     use serde_derive::{Deserialize, Serialize};
     use std::path::{Path, PathBuf};
     use url_encoded_data::UrlEncodedData;
-
+    use crate::suche::{SuchErgebnisAenderung, SuchErgebnisGrundbuch};
+    
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(tag = "status")]
     pub enum GrundbuchSucheResponse {
@@ -563,18 +564,24 @@ pub mod suche {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct GrundbuchSucheOk {
-        pub ergebnisse: Vec<GrundbuchSucheErgebnis>,
+        pub grundbuecher: Vec<GrundbuchSucheErgebnis>,
+        pub aenderungen: Vec<CommitSucheErgebnis>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
     pub struct GrundbuchSucheErgebnis {
         pub titelblatt: Titelblatt,
-        pub ergebnis_text: String,
-        pub gefunden_text: String,
-        pub download_id: String,
-        pub score: isize,
+        pub ergebnis: SuchErgebnisGrundbuch,
+        pub abos: Vec<AbonnementInfo>,
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+    pub struct CommitSucheErgebnis {
+        pub aenderung_id: String,
+        pub ergebnis: SuchErgebnisAenderung,
+        pub titelblaetter: Vec<Titelblatt>,
+    }
+    
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct GrundbuchSucheError {
         pub code: usize,
@@ -589,7 +596,7 @@ pub mod suche {
     #[get("/suche/{suchbegriff}")]
     async fn suche(suchbegriff: web::Path<String>, req: HttpRequest) -> impl Responder {
         
-        let _benutzer = match crate::db::validate_user(&req.query_string()) {
+        let benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
             Err(e) => {
                 let json = serde_json::to_string_pretty(&GrundbuchSucheResponse::StatusErr(
@@ -607,143 +614,64 @@ pub mod suche {
         };
         
         let folder_path = get_data_dir();
+        let suchbegriff = &*suchbegriff;
+        
+        let ergebnisse = match crate::suche::suche_in_index(&suchbegriff) {
+            Ok(o) => o,
+            Err(e) => {
+                let json = serde_json::to_string_pretty(&GrundbuchSucheResponse::StatusErr(
+                    GrundbuchSucheError {
+                        code: 500,
+                        text: e.clone(),
+                    },
+                ))
+                .unwrap_or_default();
 
-        let mut ergebnisse = Vec::new();
-
-        // /data
-        if let Ok(e) = std::fs::read_dir(&folder_path) {
-            for entry in e {
-                let entry = match entry {
-                    Ok(o) => o,
-                    _ => continue,
-                };
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-
-                // /data/Prenzlau
-                if let Ok(e) = std::fs::read_dir(&path) {
-                    for entry in e {
-                        let entry = match entry {
-                            Ok(o) => o,
-                            _ => continue,
-                        };
-                        let path = entry.path();
-                        if !path.is_dir() {
-                            continue;
-                        }
-
-                        // /data/Prenzlau/Ludwigsburg
-                        if let Ok(mut e) = search_files(&path, &suchbegriff) {
-                            ergebnisse.append(&mut e);
-                        }
-                    }
-                }
+                return HttpResponse::Ok()
+                    .content_type("application/json")
+                    .body(json);
             }
-        }
+        };
+        
+        let abos = crate::db::get_abos_fuer_benutzer(&benutzer)
+            .unwrap_or_default();
+                
+        let grundbuecher = ergebnisse.grundbuecher
+            .into_iter()
+            .filter_map(|ergebnis| {
 
+                let titelblatt = Titelblatt {
+                    amtsgericht: ergebnis.amtsgericht.clone(),
+                    grundbuch_von: ergebnis.grundbuch_von.clone(),
+                    blatt: ergebnis.blatt.parse().ok()?,
+                };
+                
+                let abos = abos.iter().filter(|a| {
+                    a.amtsgericht == ergebnis.amtsgericht &&
+                    a.grundbuchbezirk == ergebnis.grundbuch_von &&
+                    a.blatt.to_string() == ergebnis.blatt
+                })
+                .cloned()
+                .collect();
+                
+                Some(GrundbuchSucheErgebnis {
+                    titelblatt,
+                    ergebnis,
+                    abos,
+                })
+            })
+            .collect::<Vec<_>>();
+        
         let json =
             serde_json::to_string_pretty(&GrundbuchSucheResponse::StatusOk(GrundbuchSucheOk {
-                ergebnisse,
+                grundbuecher: grundbuecher,
+                aenderungen: Vec::new(),
             }))
             .unwrap_or_default();
 
         HttpResponse::Ok()
             .content_type("application/json")
             .body(json)
-    }
-
-    fn search_files(
-        dir: &PathBuf,
-        suchbegriff: &str,
-    ) -> Result<Vec<GrundbuchSucheErgebnis>, std::io::Error> {
-        use std::fs;
-
-        let mut ergebnisse = Vec::new();
-
-        if let Some(s) = normalize_search(suchbegriff) {
-            if let Some(file) = fs::read_to_string(Path::new(dir).join(format!("{s}.gbx")))
-                .ok()
-                .and_then(|s| serde_json::from_str::<PdfFile>(&s).ok())
-            {
-                ergebnisse.push(GrundbuchSucheErgebnis {
-                    titelblatt: file.titelblatt.clone(),
-                    ergebnis_text: "".to_string(),
-                    gefunden_text: "".to_string(),
-                    download_id: format!(
-                        "{}/{}/{}.gbx",
-                        file.titelblatt.amtsgericht,
-                        file.titelblatt.grundbuch_von,
-                        file.titelblatt.blatt
-                    ),
-                    score: isize::MAX,
-                });
-            }
-        }
-
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            let metadata = fs::metadata(&path)?;
-
-            if !metadata.is_file() {
-                continue;
-            }
-
-            let file: Option<PdfFile> = std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok());
-
-            let pdf = match file {
-                Some(s) => s,
-                None => continue,
-            };
-
-            let grundbuch_json = serde_json::to_string_pretty(&pdf.analysiert).unwrap_or_default();
-            let lines = grundbuch_json.lines().collect::<Vec<_>>();
-
-            for (i, line) in lines.iter().enumerate() {
-                match sublime_fuzzy::best_match(suchbegriff, &line) {
-                    Some(m) => {
-                        let score = m.score();
-                        ergebnisse.push(GrundbuchSucheErgebnis {
-                            titelblatt: pdf.titelblatt.clone(),
-                            ergebnis_text: {
-                                let mut t = if i > 0 {
-                                    format!(
-                                        "{}\r\n<br/>",
-                                        lines.get(i - 1).cloned().unwrap_or_default()
-                                    )
-                                } else {
-                                    String::new()
-                                };
-                                t.push_str(&format!("{line}\r\n"));
-                                if let Some(next) = lines.get(i + 1) {
-                                    t.push_str(&format!("<br/>{next}\r\n"));
-                                }
-                                t
-                            },
-                            gefunden_text: suchbegriff.to_string(),
-                            download_id: format!(
-                                "{}/{}/{}.gbx",
-                                pdf.titelblatt.amtsgericht,
-                                pdf.titelblatt.grundbuch_von,
-                                pdf.titelblatt.blatt
-                            ),
-                            score: score,
-                        });
-                        break;
-                    }
-                    None => continue,
-                }
-            }
-        }
-
-        ergebnisse.sort_by(|a, b| b.score.cmp(&a.score));
-        ergebnisse.dedup();
-
-        Ok(ergebnisse.into_iter().take(50).collect())
     }
 
     fn normalize_search(text: &str) -> Option<String> {
