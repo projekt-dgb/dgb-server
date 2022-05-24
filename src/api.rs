@@ -235,11 +235,18 @@ pub mod upload {
         use sequoia_openpgp::policy::StandardPolicy as P;
 
         let json = serde_json::to_string_pretty(&changeset.data)
-            .map_err(|e| format!("Konnte .data nicht zu JSON konvertieren: {e}"))?;
+            .map_err(|e| format!("Konnte .data nicht zu JSON konvertieren: {e}"))?
+            .lines()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\r\n");
+            
         let hash = &changeset.signatur.hash;
         let signatur = changeset.signatur.pgp_signatur.clone().join("\r\n");
         let msg = format!("-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: {hash}\r\n\r\n{json}\r\n-----BEGIN PGP SIGNATURE-----\r\n{signatur}\r\n-----END PGP SIGNATURE-----");
 
+        println!("msg received:\r\n{msg}");
+        
         let p = &P::new();
         let cert = crate::db::get_key_for_fingerprint(&changeset.fingerprint, email)?;
         let mut plaintext = Vec::new();

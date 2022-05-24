@@ -334,7 +334,7 @@ pub struct PdfTextRow {
     pub geroetet: Geroetet,
     pub teil_geroetet: BTreeMap<usize, String>,
     pub force_single_line: Vec<usize>,
-    pub hvm_exception: bool,
+    pub hvm_exception: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -383,7 +383,7 @@ impl PdfTextRow {
         .map(|s| (s * 1000.0).round() as usize)
         .max()
         .unwrap_or(0) as f32 / 1000.0_f32
-        + if self.hvm_exception { 5.0 } else { 0.0 }
+        + if self.hvm_exception.is_some() { 10.0 } else { 0.0 }
     }
     
     fn add_to_page(&self, layer: &mut PdfLayerReference, fonts: &PdfFonts, y_start: f32) {
@@ -392,16 +392,14 @@ impl PdfTextRow {
             layer.set_fill_color(Color::Cmyk(RED));
             layer.set_outline_color(Color::Cmyk(RED));
         }
-        
-        layer.set_font(&fonts.courier_bold, 10.0);
-        layer.set_line_height(10.0);
 
         let max_width_mm = self.header.get_max_width_mm();
         let self_height = self.get_height_mm();
         let x_start_mm = self.header.get_starting_x_spalte_mm(0);
         let col_id_half = self.texts.len() / 2;
         
-        if self.hvm_exception {
+        if let Some(s) = self.hvm_exception.as_ref() {
+        
             layer.save_graphics_state();
             layer.set_outline_thickness(0.75);
             layer.set_fill_color(Color::Cmyk(WHITE));
@@ -410,7 +408,7 @@ impl PdfTextRow {
                     (Point::new(Mm(x_start_mm as f64), Mm(y_start as f64)), false),
                     (Point::new(Mm(x_start_mm as f64), Mm(y_start as f64 - self_height as f64)), false),
                     (Point::new(Mm(x_start_mm as f64 + max_width_mm as f64), Mm(y_start as f64 - self_height as f64)), false),
-                    (Point::new(Mm(x_start_mm as f64 + max_width_mm as f64), Mm(y_start as f64 - self_height as f64)), false)
+                    (Point::new(Mm(x_start_mm as f64 + max_width_mm as f64), Mm(y_start as f64)), false)
                 ],
                 is_closed: true,
                 has_fill: true,
@@ -418,7 +416,20 @@ impl PdfTextRow {
                 is_clipping_path: false,
             });
             layer.restore_graphics_state();
+            
+            layer.begin_text_section();
+            layer.set_font(&fonts.helvetica, 6.0);
+            layer.set_line_height(6.0);
+            layer.set_text_cursor(
+                Mm((self.header.get_starting_x_spalte_mm(0) + 1.0) as f64),
+                Mm(y_start as f64 - 3.5),
+            );
+            layer.end_text_section();
+            layer.write_text(&format!("HERRSCHVERMERK ZU LFD. NR. {}", unhyphenate(&s)), &fonts.helvetica);
         }
+        
+        layer.set_font(&fonts.courier_bold, 10.0);
+        layer.set_line_height(10.0);
         
         for (col_id, text) in self.texts.iter().enumerate() {
             
@@ -432,12 +443,17 @@ impl PdfTextRow {
                 }
             }
             
-            let max_col_width_for_column = self.header.get_max_col_width(col_id);
+            let max_col_width_for_column = if self.hvm_exception.is_some() && col_id == 2 {
+                80
+            } else {
+                self.header.get_max_col_width(col_id)            
+            };
+            
             let text_broken_lines = wordbreak_text(&text, max_col_width_for_column);
             layer.begin_text_section();
             layer.set_text_cursor(
                 Mm((self.header.get_starting_x_spalte_mm(col_id) + 1.0) as f64),
-                Mm(y_start as f64 + if self.hvm_exception { 5.0 } else { 0.0 }),
+                Mm(y_start as f64 - if self.hvm_exception.is_some() { 7.5 } else { 0.0 }),
             );
             
             if self.force_single_line.contains(&col_id) {
@@ -2716,7 +2732,7 @@ fn get_text_rows(
                         geroetet: Geroetet::Ganz(bv.ist_geroetet()),
                         teil_geroetet: BTreeMap::new(),
                         force_single_line: vec![6],
-                        hvm_exception: false,
+                        hvm_exception: None,
                     });
                 },
                 BvEintrag::Recht(hvm) => {
@@ -2724,14 +2740,13 @@ fn get_text_rows(
                         texts: vec![
                             format!("{}", hvm.lfd_nr),
                             hvm.bisherige_lfd_nr.clone().map(|b| format!("{}", b)).unwrap_or_default(),
-                            hvm.zu_nr.clone().into(),
                             hvm.text.clone().into(),
                         ],
                         header: PdfHeader::Bestandsverzeichnis,
                         geroetet: Geroetet::Ganz(bv.ist_geroetet()),
                         teil_geroetet: BTreeMap::new(),
                         force_single_line: vec![6],
-                        hvm_exception: true,
+                        hvm_exception: Some(hvm.zu_nr.clone().text()),
                     });
                 }
             }
@@ -2774,7 +2789,7 @@ fn get_text_rows(
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
     }
@@ -2818,7 +2833,7 @@ fn get_text_rows(
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
         
@@ -2860,7 +2875,7 @@ fn get_text_rows(
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
     }
@@ -2881,7 +2896,7 @@ fn get_text_rows(
                 geroetet: Geroetet::Ganz(abt2.ist_geroetet()),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
         
@@ -2922,7 +2937,7 @@ fn get_text_rows(
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
     }
@@ -2943,7 +2958,7 @@ fn get_text_rows(
                 geroetet: Geroetet::Ganz(abt3.ist_geroetet()),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
         
@@ -2984,7 +2999,7 @@ fn get_text_rows(
                 ),
                 teil_geroetet: BTreeMap::new(),
                 force_single_line: Vec::new(),
-                hvm_exception: false,
+                hvm_exception: None,
             });
         }
     }

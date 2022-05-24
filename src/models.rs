@@ -51,7 +51,8 @@ pub fn get_index_dir() -> String {
 /// Entspricht einem PDF-Grundbuch
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfFile {
-    /// Pfad der zugehörigen .pdf-Datei
+
+    // Pfad der zugehörigen .pdf-Datei
     #[serde(default)]
     pub datei: Option<String>,
     /// Some(pfad) wenn Datei digital angelegt wurde
@@ -67,25 +68,26 @@ pub struct PdfFile {
     pub seitenzahlen: Vec<u32>,
     /// Seiten, die geladen wurden
     #[serde(default)]
-    pub geladen: BTreeMap<u32, SeiteParsed>,
+    pub geladen: BTreeMap<String, SeiteParsed>,
     /// Analysiertes Grundbuch
     #[serde(default)]
     pub analysiert: Grundbuch,
     /// Layout der Seiten aus pdftotext
     #[serde(default)]
     pub pdftotext_layout: PdfToTextLayout,
-    /// Seitennummern von Seiten, die geladen wurden
+    
+    /// Seitennummern von Seiten, die versucht wurden, geladen zu werden
     #[serde(default)]
     pub seiten_versucht_geladen: BTreeSet<u32>,
     /// Seiten -> OCR Text (tesseract)
     #[serde(default)]
-    pub seiten_ocr_text: BTreeMap<u32, String>,
+    pub seiten_ocr_text: BTreeMap<String, String>,
     /// Anpassungen in Zeilen und Spaltengrößen auf der Seite
     #[serde(default)]
-    pub anpassungen_seite: BTreeMap<usize, AnpassungSeite>,
+    pub anpassungen_seite: BTreeMap<String, AnpassungSeite>,
     /// Anpassungen im Seitentyp
     #[serde(default)]
-    pub klassifikation_neu: BTreeMap<usize, SeitenTyp>,
+    pub klassifikation_neu: BTreeMap<String, SeitenTyp>,
     /// Dateipfade zu .csv-Dateien für Nebenbeteiligte
     #[serde(default)]
     pub nebenbeteiligte_dateipfade: Vec<String>,
@@ -688,7 +690,7 @@ pub enum SeitenTyp {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PdfToTextLayout {
-    pub seiten: BTreeMap<u32, PdfToTextSeite>,
+    pub seiten: BTreeMap<String, PdfToTextSeite>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
