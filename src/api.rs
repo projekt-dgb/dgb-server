@@ -1,3 +1,16 @@
+/// API für `/status` Anfragen
+pub mod status {
+    use actix_web::{get, HttpRequest, Responder, HttpResponse};
+    
+    // Test, um status 
+    #[get("/")]
+    async fn status(req: HttpRequest) -> impl Responder {
+        HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(include_str!("../API.md"))
+    }
+}
+
 /// API für `/upload` Anfragen
 pub mod upload {
 
@@ -818,10 +831,10 @@ pub mod abo {
         text: String,
     }
 
-    #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}")]
-    async fn abo_neu(tag: web::Path<(String, String, String, usize, String)>, req: HttpRequest) -> impl Responder {
+    #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}/{email}")]
+    async fn abo_neu(tag: web::Path<(String, String, String, usize, String, String)>, req: HttpRequest) -> impl Responder {
         
-        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag) = &*tag;
+        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag, email) = &*tag;
         
         let benutzer = match crate::db::validate_user(&req.query_string()) {
             Ok(o) => o,
@@ -839,12 +852,22 @@ pub mod abo {
                     .body(json);
             }
         };
-            
-        if let Err(e) = crate::db::create_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &benutzer.email, &tag) {
+        
+        if email_oder_webhook == "email" && email != benutzer.email.as_str() {
+            return HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+                    code: 1,
+                    text: format!("E-Mail des Abonnements und E-Mail der Authentifizierung stimmen nicht überein"),
+                }))
+                .unwrap_or_default());
+        }
+        
+        if let Err(e) = crate::db::create_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &email, &tag) {
                 return HttpResponse::Ok()
                 .content_type("application/json")
                 .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
-                    code: 0,
+                    code: 500,
                     text: format!("{e}"),
                 }))
                 .unwrap_or_default());

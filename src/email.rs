@@ -40,7 +40,7 @@ pub struct AboWebhookInfo {
     pub blatt: i32,
     pub webhook: String,
     pub aktenzeichen: String,
-    pub commit_id: String,
+    pub aenderungs_id: String,
 }
 
 pub fn send_change_email(server_url: &str, abo: &AbonnementInfo, commit_id: &str) -> Result<(), String> {
@@ -169,7 +169,7 @@ pub async fn send_change_webhook(server_url: &str, abo: &AbonnementInfo, commit_
         blatt: abo.blatt.clone(),
         webhook: abo.text.clone(),
         aktenzeichen: abo.aktenzeichen.clone(),
-        commit_id: commit_id.to_string(),
+        aenderungs_id: commit_id.to_string(),
     };
 
     let client = reqwest::Client::new();

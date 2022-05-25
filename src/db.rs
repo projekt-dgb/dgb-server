@@ -1,9 +1,5 @@
 //! Operationen über die Benutzer-Datenbank
 
-use rsa::{
-    pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding},
-    PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey,
-};
 use rusqlite::{Connection, OpenFlags};
 use crate::models::{BenutzerInfo, AbonnementInfo, get_db_path, get_keys_dir};
 

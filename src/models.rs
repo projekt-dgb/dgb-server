@@ -26,6 +26,17 @@ pub fn get_data_dir() -> String {
         .to_string()
 }
 
+pub fn get_logs_dir() -> String {
+    std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("logs")
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
 pub fn get_keys_dir() -> String {
     std::env::current_exe()
         .unwrap()

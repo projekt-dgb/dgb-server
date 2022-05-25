@@ -50,6 +50,7 @@
 //
 
 use actix_web::{web::JsonConfig, App, HttpServer};
+use crate::email::SmtpConfig;
 use clap::Parser;
 
 pub mod api;
@@ -61,37 +62,34 @@ pub mod index;
 pub mod pdf;
 pub mod suche;
 
-/// Kommandozeilenargumente
+/// Server für .gbx-Dateien, läuft auf 127.0.0.1:8080
 #[derive(clap::Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    /// Ob der Server HTTPS benutzen soll
-    #[clap(short, long)]
-    https: bool,
-
-    /// Server-interne IP, auf der der Server erreichbar sein soll
-    #[clap(short, long, default_value = "127.0.0.1")]
-    ip: String,
-    
-    /// E-Mail-Host um Grundbuchblätter rauszusenden
-    #[clap(short, long, default_value = "")]
-    smtp_host: String,
-    /// E-Mail Konto, von dem Grundbuchblatt-Änderungen gesendet werden (SMTP)
-    #[clap(short, long, default_value = "")]
-    smtp_email: String,
-    /// Passwort für SMTP E-Mail Konto für Grundbuchänderungen
-    #[clap(short, long, default_value = "")]
-    smtp_passwort: String,
-    
     /// Befehl zum Bearbeiten der Datenbark (kein Befehl = Server startet)
     #[clap(subcommand)]
-    action: Option<ArgAction>,
+    action: ArgAction,
 }
 
 #[derive(clap::Subcommand, Debug, PartialEq)]
-enum ArgAction {
+pub enum ArgAction {
+    /// Starte den Server (--ip, --smtp_host, --smtp_email, --smtp_passwort)
+    Start {
+        /// IP-Adresse, die der Server verwenden soll
+        #[clap(default_value = "127.0.0.1")]
+        ip: String,
+        /// E-Mail-Host um Grundbuchblätter rauszusenden
+        #[clap(default_value = "")]
+        smtp_host: String,
+        /// E-Mail Konto, von dem Grundbuchblatt-Änderungen gesendet werden (SMTP)
+        #[clap(default_value = "")]
+        smtp_email: String,
+        /// Passwort für SMTP E-Mail Konto für Grundbuchänderungen
+        #[clap(default_value = "")]
+        smtp_passwort: String,   
+    },
     /// Starte die Indexierung der Grundbuchblätter als neuen Prozess
-    StarteIndexierung,
+    Indexiere,
     /// Suche nach Suchbegriff in momentan vorhandenem Index
     Suche { begriff: String },
     /// Neuen Benutzer anlegen (--name, --email, --passwort, --rechte)
@@ -112,110 +110,129 @@ enum ArgAction {
 
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
-struct BenutzerNeuArgs {
+pub struct BenutzerNeuArgs {
     /// Name des neuen Benutzers
     #[clap(short, long)]
-    name: String,
+    pub name: String,
 
     /// E-Mail des neuen Benutzers
     #[clap(short, long)]
-    email: String,
+    pub email: String,
 
     /// Passwort des neuen Benutzers
     #[clap(short, long)]
-    passwort: String,
+    pub passwort: String,
 
     /// Rechte (Typ) des neuen Benutzers
     #[clap(short, long, default_value = "gast")]
-    rechte: String,
+    pub rechte: String,
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
-struct BenutzerLoeschenArgs {
+pub struct BenutzerLoeschenArgs {
     /// E-Mail des Benutzers, der gelöscht werden soll
     #[clap(short, long)]
-    email: String,
+    pub email: String,
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
-struct BezirkNeuArgs {
+pub struct BezirkNeuArgs {
     /// Name des Lands für den neuen Grundbuchbezirk
     #[clap(short, long)]
-    land: String,
+    pub land: String,
 
     /// Name des Amtsgerichts für den neuen Grundbuchbezirk
     #[clap(short, long)]
-    amtsgericht: String,
+    pub amtsgericht: String,
 
     /// Name des neuen Grundbuchbezirks
     #[clap(short, long)]
-    bezirk: String,
+    pub bezirk: String,
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
-struct BezirkLoeschenArgs {
+pub struct BezirkLoeschenArgs {
     /// Name des Lands des Grundbuchbezirks, der gelöscht werden soll
     #[clap(short, long)]
-    land: String,
+    pub land: String,
 
     /// Name des Amtsgerichts des Grundbuchbezirks, der gelöscht werden soll
     #[clap(short, long)]
-    amtsgericht: String,
+    pub amtsgericht: String,
 
     /// Name des Grundbuchbezirks, der gelöscht werden soll
     #[clap(short, long)]
-    bezirk: String,
+    pub bezirk: String,
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
-struct AboNeuArgs {
+pub struct AboNeuArgs {
     /// Typ des Abonnements ("email" oder "webhook")
     #[clap(short, long)]
-    typ: String,
+    pub typ: String,
     
     /// Name des Amtsgerichts / Gemarkung / Blatts des neuen Abos, 
     /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254")
     #[clap(short, long)]
-    blatt: String,
+    pub blatt: String,
 
     /// Name der E-Mail, für die das Abo eingetragen werden soll
     #[clap(short, long)]
-    email: String,
+    pub email: String,
 
     /// Aktenzeichen für das neue Abo
     #[clap(short, long)]
-    aktenzeichen: String,
+    pub aktenzeichen: String,
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
 #[clap(author, version, about, long_about = None)]
-struct AboLoeschenArgs {
+pub struct AboLoeschenArgs {
     /// Typ des Abonnements ("email" oder "webhook")
     #[clap(short, long)]
-    typ: String,
+    pub typ: String,
     
     /// Name des Amtsgerichts / Gemarkung / Blatts des Abos, 
     /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254 ")
     #[clap(short, long)]
-    blatt: String,
+    pub blatt: String,
 
     /// Name der E-Mail, für die das Abo eingetragen ist
     #[clap(short, long)]
-    email: String,
+    pub email: String,
 
     /// Aktenzeichen des Abonnements
     #[clap(short, long)]
-    aktenzeichen: String,
+    pub aktenzeichen: String,
 }
 
-fn process_action(action: &ArgAction) -> Result<(), String> {
+pub async fn process_action(action: &ArgAction) -> Result<(), String> {
     use self::ArgAction::*;
     match action {
-        StarteIndexierung => crate::index::index_all(),
+        Start {
+            ip,
+            smtp_host,
+            smtp_email,
+            smtp_passwort,
+        } => {
+            
+            let config = SmtpConfig {
+                smtp_adresse: smtp_host.clone(),
+                email: smtp_email.clone(),
+                passwort: smtp_passwort.clone(),
+            };
+            
+            let _ = init_logger()?;
+            let _ = init(config)?;
+            
+            startup_http_server(&ip).await
+            .map_err(|e| format!("{e}"))
+        },
+        Indexiere => crate::index::index_all(),
         Suche { begriff } => {
             let suchergebnisse = crate::suche::suche_in_index(&begriff)?;
             println!("{:#?}", suchergebnisse);
@@ -253,51 +270,88 @@ fn process_action(action: &ArgAction) -> Result<(), String> {
     }
 }
 
+fn init(config: SmtpConfig) -> Result<(), String> {
+    
+    use crate::models::{get_index_dir, get_data_dir, get_keys_dir, get_logs_dir};
+
+    crate::db::create_database()
+    .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
+    
+    let _ = std::fs::create_dir_all(get_data_dir());
+    let _ = std::fs::create_dir_all(get_index_dir());
+    let _ = std::fs::create_dir_all(get_keys_dir());
+    let _ = std::fs::create_dir_all(get_logs_dir());
+
+    let _ = crate::email::init_email_config(config);
+    
+    Ok(())
+}
+
 // Server-Start, extra Funktion für Unit-Tests
-pub async fn startup_http_server(ip: &str, https: bool) -> std::io::Result<()> {
+async fn startup_http_server(ip: &str) -> std::io::Result<()> {    
     HttpServer::new(|| {
+    
         let json_cfg = JsonConfig::default()
             .limit(usize::MAX)
             .content_type_required(false);
 
         App::new()
             .app_data(json_cfg)
+            .service(crate::api::status::status)
             .service(crate::api::suche::suche)
             .service(crate::api::download::download_gbx)
             .service(crate::api::download::dowload_pdf)
             .service(crate::api::upload::upload)
             .service(crate::api::abo::abo_neu)
             .service(crate::api::abo::abo_loeschen)
-
     })
-    .bind((ip, if https { 5431 } else { 8080 }))?
+    .bind((ip, 8080))?
     .run()
     .await
 }
 
+fn init_logger() -> Result<(), String> {
+
+    use slog::*;
+    use std::fs::OpenOptions;
+    use std::path::Path;
+    use crate::models::get_logs_dir;
+    
+    let log_path = Path::new(&get_logs_dir()).join("log.json");
+    
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&log_path)
+        .map_err(|e| format!("{}: {e}", log_path.display()))?; 
+        
+    let drain = slog_json::Json::new(file)
+        .set_pretty(true)
+        .add_default_keys()
+        .build()
+        .fuse();
+        
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let _ = slog::Logger::root(
+        drain, 
+        o!(
+            "format" => "pretty", 
+            "version" => env!("CARGO_PKG_VERSION")
+        )
+    );
+    
+    Ok(())
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    use crate::email::SmtpConfig;
-
-    let args = Args::parse();
-
-    let _ = crate::email::init_email_config(SmtpConfig {
-        smtp_adresse: args.smtp_host.clone(),
-        email: args.smtp_email.clone(),
-        passwort: args.smtp_passwort.clone(),
-    });
-    
-    if let Err(e) = crate::db::create_database() {
-        println!("Fehler in create_database:\r\n{e}");
-        return Ok(());
-    }
-
-    if let Some(action) = args.action.as_ref() {
-        if let Err(e) = process_action(action) {
-            println!("Fehler in process_action:\r\n{action:#?}:\r\n{e}");
+    let action = Args::parse().action;
+    match process_action(&action).await {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            log::error!("Fehler: {action:?}:\r\n{e}");
+            Ok(())
         }
-        return Ok(());
     }
-
-    startup_http_server(&args.ip, args.https).await
 }

@@ -2,32 +2,34 @@
 name = "dgb-server"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["Felix Schütt <Felix.Schuett@vlf-brandenburg.de>"]
 
 [dependencies]
-actix-web = "4"
-serde = "1"
-serde_derive = "1"
-serde_json = "1"
-url_encoded_data = "0.6"
-sublime_fuzzy = "0.7.0"
-lazy_static = "1.4.0"
-regex = "1.5.5"
-git2 = "0.14.4"
-rand = "0.8.5"
-rsa = "0.6.1"
-clap = { version = "3.1.18", features = ["derive", "env", "unicode", "wrap_help"] }
-printpdf = "0.5.0"
-sodiumoxide = "0.2.7"
+actix-web = { version = "4.0.1", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies"] }
+serde = { version = "1.0.137", default-features = false, features = ["std"] }
+serde_derive = { version = "1.0.137", default-features = false, features = [] }
+serde_json = { version = "1.0.81", default-features = false, features = ["std"] }
+url_encoded_data = { version = "0.6.1", default-features = false, features = [] }
+lazy_static = { version = "1.4.0", default-features = false, features = [] }
+regex = { version = "1.5.6", default-features = false, features = ["std", "perf", "unicode"] }
+git2 = { version = "0.14.4", default-features = false, features = [] }
+clap = { version = "3.1.18", default-features = false, features = ["derive", "std", "env", "unicode", "wrap_help"] }
+printpdf = { version = "0.5.0", default-features = false, features = [] }
+sodiumoxide = { version = "0.2.7", default-features = false, features = [] }
 sequoia-openpgp = { version = "1.8.0", default-features = false, features = ["crypto-rust", "allow-experimental-crypto", "allow-variable-time-crypto", "compression"] }
-anyhow = "*"
-urlencoding = "2.1.0"
-reqwest = { version = "0.11.10", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
-base64 = "0.13.0"
-tantivy = "0.17.0"
-lopdf = { version = "0.26.0", features = ["nom_parser"] }
-hyphenation = { version = "0.8.4", features = ["embed_all", "nfc"] }
-textwrap = { version = "0.15.0", features = ["smawk", "hyphenation"] }
+anyhow = { version = "1.0.57", default-features = false, features = [] }
+urlencoding = { version = "2.1.0", default-features = false, features = [] }
+reqwest = { version = "0.11.10", default-features = false, features = ["json", "rustls-tls", "gzip", "brotli"] }
+tokio = { version = "1", default-features = false, features = ["full"] }
+base64 = { version = "0.13.0", default-features = false, features = ["std"] }
+tantivy = { version = "0.17.0", default-features = false, features = ["mmap", "lz4-compression"] }
+hyphenation = { version = "0.8.4", default-features = false, features = ["embed_all", "nfc"] }
+textwrap = { version = "0.15.0", default-features = false, features = ["unicode-linebreak", "unicode-width", "smawk", "hyphenation"] }
+log = { version = "0.4.17", default-features = false, features = ["max_level_trace", "release_max_level_debug"] }
+slog = { version = "2.7.0", default-features = false, features = ["max_level_trace", "release_max_level_debug"] }
+slog-json = { version = "2.6.1", default-features = false, features = [] }
+slog-async = { version = "2.7.0", default-features = false, features = [] }
 
 [dependencies.lettre]
 version = "0.10.0-rc.6"
@@ -51,3 +53,26 @@ sha1collisiondetection = { git = "https://gitlab.com/sequoia-pgp/sha1collisionde
 [dependencies.rusqlite]
 version = "0.27.0"
 features = ["bundled"]
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+debug = false
+debug-assertions = false
+overflow-checks = false
+incremental = false
+rpath = false
+strip = true
+
+[package.metadata.deb]
+maintainer = "Felix Schütt <Felix.Schuett@vlf-brandenburg.de>"
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/dgb-server", "usr/local/bin/", "755"],
+    ["dgb-server.desktop", "usr/local/share/applications/", "755"],
+    ["dgb-server.xpm", "usr/share/pixmaps/", "755"],
+]

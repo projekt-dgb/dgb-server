@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Digitales Grundbuch (Server
+GenericName=dgb-server
+Keywords=dgb;dgb-server;verfahren;digital;
+GenericName[de]=Server für Austausch und Verwaltung von Grundbuchblättern
+Exec=dgb-server
+Icon=/usr/share/pixmaps/dgb-server.xpm
+Terminal=true
+Type=Application
+StartupNotify=false
+SingleMainWindow=true
