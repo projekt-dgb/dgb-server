@@ -3,7 +3,6 @@
 use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-
 pub fn get_db_path() -> String {
     std::env::current_exe()
         .unwrap()
@@ -62,56 +61,62 @@ pub fn get_index_dir() -> String {
 /// Entspricht einem PDF-Grundbuch
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfFile {
-
     // Pfad der zugehörigen .pdf-Datei
     #[serde(default)]
+    #[serde(skip_serializing_if="Option::is_none")]
     pub datei: Option<String>,
     /// Some(pfad) wenn Datei digital angelegt wurde
     #[serde(default)]
+    #[serde(skip_serializing_if="Option::is_none")]
     pub gbx_datei_pfad: Option<String>,
     /// Land des Grundbuchs (z.B. "Brandenburg")
     #[serde(default)]
+    #[serde(skip_serializing_if="Option::is_none")]
     pub land: Option<String>,
-    /// Titelseite des Grundbuchs (Deckblatt)
-    pub titelblatt: Titelblatt,
     /// Seitenzahlen im Grundbuch
+    #[serde(skip_serializing_if="Vec::is_empty")]
     #[serde(default)]
     pub seitenzahlen: Vec<u32>,
     /// Seiten, die geladen wurden
+    #[serde(skip_serializing_if="BTreeMap::is_empty")]
     #[serde(default)]
     pub geladen: BTreeMap<String, SeiteParsed>,
-    /// Analysiertes Grundbuch
-    #[serde(default)]
-    pub analysiert: Grundbuch,
     /// Layout der Seiten aus pdftotext
     #[serde(default)]
+    #[serde(skip_serializing_if="PdfToTextLayout::is_empty")]
     pub pdftotext_layout: PdfToTextLayout,
-    
     /// Seitennummern von Seiten, die versucht wurden, geladen zu werden
     #[serde(default)]
+    #[serde(skip_serializing_if="BTreeSet::is_empty")]
     pub seiten_versucht_geladen: BTreeSet<u32>,
     /// Seiten -> OCR Text (tesseract)
     #[serde(default)]
     pub seiten_ocr_text: BTreeMap<String, String>,
     /// Anpassungen in Zeilen und Spaltengrößen auf der Seite
+    #[serde(skip_serializing_if="BTreeMap::is_empty")]
     #[serde(default)]
     pub anpassungen_seite: BTreeMap<String, AnpassungSeite>,
     /// Anpassungen im Seitentyp
+    #[serde(skip_serializing_if="BTreeMap::is_empty")]
     #[serde(default)]
     pub klassifikation_neu: BTreeMap<String, SeitenTyp>,
     /// Dateipfade zu .csv-Dateien für Nebenbeteiligte
     #[serde(default)]
+    #[serde(skip_serializing_if="Vec::is_empty")]
     pub nebenbeteiligte_dateipfade: Vec<String>,
+    
+    /// Analysiertes Grundbuch
+    pub analysiert: Grundbuch,
 }
 
 /// Deckblatt des PDFs
-#[derive(Debug, Default, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct Titelblatt {
-    /// "Amtsgericht von X"
+    /// Amtsgericht von X
     pub amtsgericht: String,
-    /// "Grundbuch von X"
+    /// Grundbuch von X
     pub grundbuch_von: String,
-    /// "Blatt X"
+    /// Blatt X
     pub blatt: usize,
 }
 
@@ -124,22 +129,42 @@ pub struct SeiteParsed {
 }
 
 /// Analysiertes Grundbuch
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grundbuch {
     pub titelblatt: Titelblatt,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Bestandsverzeichnis::is_empty")]
     pub bestandsverzeichnis: Bestandsverzeichnis,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Abteilung1::is_empty")]
     pub abt1: Abteilung1,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Abteilung2::is_empty")]
     pub abt2: Abteilung2,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Abteilung3::is_empty")]
     pub abt3: Abteilung3,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Bestandsverzeichnis {
-    // Index = lfd. Nr. der Grundstücke
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub eintraege: Vec<BvEintrag>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub zuschreibungen: Vec<BvZuschreibung>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub abschreibungen: Vec<BvAbschreibung>,
+}
+
+impl Bestandsverzeichnis {
+    pub fn is_empty(&self) -> bool {
+        self.eintraege.is_empty() &&
+        self.zuschreibungen.is_empty() &&
+        self.abschreibungen.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -168,36 +193,66 @@ impl Default for StringOrLines {
     }
 }
 
+impl StringOrLines {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            StringOrLines::SingleLine(s) => s.is_empty(),
+            StringOrLines::MultiLine(ml) => ml.is_empty(),
+        }
+    }
+}
+
 // Eintrag für ein grundstücksgleiches Recht
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct BvEintragRecht {
     pub lfd_nr: usize,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub zu_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bisherige_lfd_nr: Option<usize>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct BvEintragFlurstueck {
     pub lfd_nr: usize,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bisherige_lfd_nr: Option<usize>,
     pub flur: usize,
-    // "87" oder "87/2"
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub flurstueck: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gemarkung: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bezeichnung: Option<StringOrLines>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "FlurstueckGroesse::ist_leer")]
     pub groesse: FlurstueckGroesse,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
@@ -214,8 +269,19 @@ pub enum FlurstueckGroesse {
     },
 }
 
-impl FlurstueckGroesse {
+impl Default for FlurstueckGroesse {
+    fn default() -> Self {
+        FlurstueckGroesse::Metrisch { m2: None }
+    }
+}
 
+impl FlurstueckGroesse {
+    pub fn ist_leer(&self) -> bool {
+        match self {
+            FlurstueckGroesse::Metrisch { m2 } => m2.is_none(),
+            FlurstueckGroesse::Hektar { ha, a, m2 } => m2.is_none() && ha.is_none() && a.is_none(),
+        }
+    }
     pub fn get_m2(&self) -> u64 {
         match self {
             FlurstueckGroesse::Metrisch { m2 } => m2.unwrap_or(0),
@@ -291,31 +357,31 @@ impl BvEintrag {
 
 impl BvZuschreibung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl BvAbschreibung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt1GrundEintragung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt1EintragV1 {
     pub fn ist_geroetet(&self) -> bool {
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt1EintragV2 {
     pub fn ist_geroetet(&self) -> bool {
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
@@ -345,49 +411,49 @@ impl Abt1Eintrag {
 
 impl Abt1Veraenderung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt1Loeschung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt2Eintrag {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt2Veraenderung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt2Loeschung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt3Eintrag {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt3Veraenderung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
 impl Abt3Loeschung {
     pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.unwrap_or(self.automatisch_geroetet)
+        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
     }
 }
 
@@ -402,39 +468,65 @@ impl From<StringOrLines> for String {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct BvZuschreibung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub bv_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct BvAbschreibung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub bv_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Abteilung1 {
-    // Index = lfd. Nr. der Grundstücke
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub eintraege: Vec<Abt1Eintrag>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub grundlagen_eintragungen: Vec<Abt1GrundEintragung>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub veraenderungen: Vec<Abt1Veraenderung>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub loeschungen: Vec<Abt1Loeschung>,
+}
+
+impl Abteilung1 {
+    pub fn is_empty(&self) -> bool {
+        self.eintraege.is_empty() &&
+        self.grundlagen_eintragungen.is_empty() &&
+        self.veraenderungen.is_empty() &&
+        self.loeschungen.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -450,14 +542,19 @@ pub struct Abt1EintragV2 {
     // lfd. Nr. der Eintragung
     pub lfd_nr: usize,
     // Rechtstext
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub eigentuemer: StringOrLines,
     // Used to distinguish from Abt1EintragV1
     pub version: usize,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
@@ -466,65 +563,106 @@ pub struct Abt1EintragV1 {
     // lfd. Nr. der Eintragung
     pub lfd_nr: usize,
     // Rechtstext
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub eigentuemer: StringOrLines,
     // lfd. Nr der betroffenen Grundstücke im Bestandsverzeichnis
-    pub bv_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
+    pub bv_nr: StringOrLines, 
     // Vec<BvNr>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub grundlage_der_eintragung: StringOrLines,
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Abt1GrundEintragung {
     // lfd. Nr. der Eintragung
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub bv_nr: StringOrLines,
     // Grundlage der Eintragung
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
-
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt1Veraenderung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub lfd_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt1Loeschung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub lfd_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Abteilung2 {
-    // Index = lfd. Nr. der Grundstücke
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub eintraege: Vec<Abt2Eintrag>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub veraenderungen: Vec<Abt2Veraenderung>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub loeschungen: Vec<Abt2Loeschung>,
+}
+
+impl Abteilung2 {
+    pub fn is_empty(&self) -> bool {
+        self.eintraege.is_empty() &&
+        self.veraenderungen.is_empty() &&
+        self.loeschungen.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -532,98 +670,154 @@ pub struct Abt2Eintrag {
     // lfd. Nr. der Eintragung
     pub lfd_nr: usize,
     // lfd. Nr der betroffenen Grundstücke im Bestandsverzeichnis
-    pub bv_nr: StringOrLines, // Vec<BvNr>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
+    pub bv_nr: StringOrLines,
     // Rechtstext
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt2Veraenderung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub lfd_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt2Loeschung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub lfd_nr: StringOrLines,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Abteilung3 {
-    // Index = lfd. Nr. der Grundstücke
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub eintraege: Vec<Abt3Eintrag>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub veraenderungen: Vec<Abt3Veraenderung>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub loeschungen: Vec<Abt3Loeschung>,
 }
+
+impl Abteilung3 {
+    pub fn is_empty(&self) -> bool {
+        self.eintraege.is_empty() &&
+        self.veraenderungen.is_empty() &&
+        self.loeschungen.is_empty()
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Abt3Eintrag {
     // lfd. Nr. der Eintragung
     pub lfd_nr: usize,
     // lfd. Nr der betroffenen Grundstücke im Bestandsverzeichnis
-    pub bv_nr: StringOrLines, // Vec<BvNr>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
+    pub bv_nr: StringOrLines,
     // Betrag (EUR / DM)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub betrag: StringOrLines,
     /// Rechtstext
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt3Veraenderung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub lfd_nr: StringOrLines,
     #[serde(default)]
-    pub betrag: StringOrLines,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt3Loeschung {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub lfd_nr: StringOrLines,
     #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub betrag: StringOrLines,
     #[serde(default)]
+    #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
-    pub automatisch_geroetet: bool,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub manuell_geroetet: Option<bool>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
 
 #[derive(Debug, Default, Clone, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct PositionInPdf {
     pub seite: u32,
+    #[serde(default)]
     pub rect: OptRect,
 }
 
@@ -646,7 +840,11 @@ pub struct Textblock {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AnpassungSeite {
-    pub spalten: BTreeMap<String, Rect>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub spalten: BTreeMap<String, Rect>,    
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub zeilen: Vec<f32>,
 }
 
@@ -701,7 +899,13 @@ pub enum SeitenTyp {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct PdfToTextLayout {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub seiten: BTreeMap<String, PdfToTextSeite>,
+}
+
+impl PdfToTextLayout {
+    pub fn is_empty(&self) -> bool { self.seiten.is_empty() }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -709,17 +913,6 @@ pub struct PdfToTextSeite {
     pub breite_mm: f32,
     pub hoehe_mm: f32,
     pub texte: Vec<Textblock>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AuthFormData {
-    // E-Mail des Nutzers
-    pub email: String,
-    // Passwort (Plaintext)
-    pub passwort: String,
-    // Privater Schlüssel in Base64-Format
-    #[serde(default)]
-    pub pkey: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

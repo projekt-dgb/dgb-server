@@ -130,8 +130,8 @@ pub fn index_all() -> Result<(), String> {
             if let Some(s) = pdf.as_ref() {
             
                 let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
-                    if *ag == s.titelblatt.amtsgericht && 
-                    *bezirk == s.titelblatt.grundbuch_von { 
+                    if *ag == s.analysiert.titelblatt.amtsgericht && 
+                    *bezirk == s.analysiert.titelblatt.grundbuch_von { 
                     Some(land.clone()) 
                     } else { 
                         None 
@@ -140,8 +140,8 @@ pub fn index_all() -> Result<(), String> {
 
                 let land = land.ok_or(format!(
                     "Kein Land für Grundbuch {}_{}.gbx gefunden", 
-                    s.titelblatt.grundbuch_von, 
-                    s.titelblatt.blatt
+                    s.analysiert.titelblatt.grundbuch_von, 
+                    s.analysiert.titelblatt.blatt
                 ))?;
                 
                 add_grundbuchblatt_zu_index(&land, s, &index_writer, &grundbuch_schema)?;
@@ -207,18 +207,18 @@ pub fn add_grundbuchblatt_zu_index(
     
     let file_name = format!(
         "{}/{}_{}.gbx", 
-        pdf.titelblatt.amtsgericht, 
-        pdf.titelblatt.grundbuch_von, 
-        pdf.titelblatt.blatt
+        pdf.analysiert.titelblatt.amtsgericht, 
+        pdf.analysiert.titelblatt.grundbuch_von, 
+        pdf.analysiert.titelblatt.blatt
     );
     
-    let blatt = format!("{}", pdf.titelblatt.blatt);
+    let blatt = format!("{}", pdf.analysiert.titelblatt.blatt);
     let blatt_id = format!(
         "Land {} AG {} GB von {} Blatt {}", 
         land_str, 
-        pdf.titelblatt.amtsgericht, 
-        pdf.titelblatt.grundbuch_von, 
-        pdf.titelblatt.blatt
+        pdf.analysiert.titelblatt.amtsgericht, 
+        pdf.analysiert.titelblatt.grundbuch_von, 
+        pdf.analysiert.titelblatt.blatt
     );
     
     let id = schema.get_field("id").ok_or(format!("Kein Feld \"id\" in Schema \"grundbuch\""))?;
@@ -242,15 +242,15 @@ pub fn add_grundbuchblatt_zu_index(
                 
                 doc.add_text(id, &blatt_id);                
                 doc.add_text(land, land_str);
-                doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-                doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-                doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+                doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+                doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+                doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
                 doc.add_text(abteilung, "bv");
                 doc.add_text(lfd_nr, format!("{}", bvf.lfd_nr));
                 doc.add_text(text, format!(
                     "BV lfd. Nr. {}, Gemarkung {} Flur {} Flurstück {}: {}Größe: {} m²", 
                     bvf.lfd_nr,
-                    bvf.gemarkung.clone().unwrap_or(pdf.titelblatt.grundbuch_von.clone()),
+                    bvf.gemarkung.clone().unwrap_or(pdf.analysiert.titelblatt.grundbuch_von.clone()),
                     bvf.flur,
                     bvf.flurstueck,
                     bvf.bezeichnung.as_ref().map(|s| s.text_clean() + ", ").unwrap_or_default(),
@@ -268,9 +268,9 @@ pub fn add_grundbuchblatt_zu_index(
                 
                 doc.add_text(id, &blatt_id);                
                 doc.add_text(land, land_str);
-                doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-                doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-                doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+                doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+                doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+                doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
                 doc.add_text(abteilung, "bv-herrschvermerke");
                 doc.add_text(lfd_nr, format!("{}", bvr.lfd_nr));
                 doc.add_text(text, format!(
@@ -293,9 +293,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "bv-zuschreibungen");
         doc.add_text(lfd_nr, bvz.bv_nr.lines().join(" "));
         doc.add_text(text, format!("BV-Zuschreibung zu lfd. Nr. {}: {}", bvz.bv_nr.lines().join(" "), bvz.text.text_clean()));
@@ -310,9 +310,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "bv-abschreibungen");
         doc.add_text(lfd_nr, bva.bv_nr.lines().join(" "));
         doc.add_text(text, format!("BV-Abschreibung zu lfd. Nr. {}: {}", bva.bv_nr.lines().join(" "), bva.text.text_clean()));
@@ -327,9 +327,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt1");
         doc.add_text(lfd_nr, format!("{}", abt1.get_lfd_nr()));
         doc.add_text(text, format!("Abteilung 1, lfd. Nr. {}: {}", abt1.get_lfd_nr(), abt1.get_eigentuemer().text_clean()));
@@ -345,9 +345,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt1-grundlagen-eintragungen");
         doc.add_text(lfd_nr, format!("{}", abt1.bv_nr.lines().join(" ")));
         doc.add_text(text, format!("Abteilung 1, lfd. Nr. {}: {}", abt1.bv_nr.lines().join(" "), abt1.text.text_clean()));
@@ -363,9 +363,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt1-veraenderungen");
         doc.add_text(lfd_nr, bvz.lfd_nr.lines().join(" "));
         doc.add_text(text, format!("Abteilung 1 Veränderung von lfd. Nr. {}: {}", bvz.lfd_nr.lines().join(" "), bvz.text.text_clean()));
@@ -380,9 +380,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt1-loeschungen");
         doc.add_text(lfd_nr, bva.lfd_nr.lines().join(" "));
         doc.add_text(text, format!("Abteilung 1 Löschung von lfd. Nr. {}: {}", bva.lfd_nr.lines().join(" "), bva.text.text_clean()));
@@ -398,9 +398,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt2");
         doc.add_text(lfd_nr, format!("{}", abt2.lfd_nr));
         doc.add_text(text, format!("Abteilung 2, lfd. Nr. {}: {}", abt2.lfd_nr, abt2.text.text_clean()));
@@ -416,9 +416,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt2-veraenderungen");
         doc.add_text(lfd_nr, bvz.lfd_nr.lines().join(" "));
         doc.add_text(text, format!("Abteilung 2 Veränderung von lfd. Nr. {}: {}", bvz.lfd_nr.lines().join(" "), bvz.text.text_clean()));
@@ -433,9 +433,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt2-loeschungen");
         doc.add_text(lfd_nr, bva.lfd_nr.lines().join(" "));
         doc.add_text(text, format!("Abteilung 2 Löschung von lfd. Nr. {}: {}", bva.lfd_nr.lines().join(" "), bva.text.text_clean()));
@@ -451,9 +451,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt3");
         doc.add_text(lfd_nr, format!("{}", abt3.lfd_nr));
         doc.add_text(text, format!("Abteilung 3, lfd. Nr. {}: {}", abt3.lfd_nr, abt3.text.text_clean()));
@@ -469,9 +469,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt3-veraenderungen");
         doc.add_text(lfd_nr, bvz.lfd_nr.lines().join(" "));
         doc.add_text(text, format!("Abteilung 3 Veränderung von lfd. Nr. {}: {}", bvz.lfd_nr.lines().join(" "), bvz.text.text_clean()));
@@ -486,9 +486,9 @@ pub fn add_grundbuchblatt_zu_index(
         
         doc.add_text(id, &blatt_id);
         doc.add_text(land, land_str);
-        doc.add_text(amtsgericht, &pdf.titelblatt.amtsgericht);
-        doc.add_text(grundbuch_von, &pdf.titelblatt.grundbuch_von);
-        doc.add_text(blatt, format!("{}", pdf.titelblatt.blatt));
+        doc.add_text(amtsgericht, &pdf.analysiert.titelblatt.amtsgericht);
+        doc.add_text(grundbuch_von, &pdf.analysiert.titelblatt.grundbuch_von);
+        doc.add_text(blatt, format!("{}", pdf.analysiert.titelblatt.blatt));
         doc.add_text(abteilung, "abt3-loeschungen");
         doc.add_text(lfd_nr, bva.lfd_nr.lines().join(" "));
         doc.add_text(text, format!("Abteilung 3 Löschung von lfd. Nr. {}: {}", bva.lfd_nr.lines().join(" "), bva.text.text_clean()));

@@ -14,7 +14,7 @@ pub mod status {
 /// API für `/upload` Anfragen
 pub mod upload {
 
-    use crate::models::{AuthFormData, PdfFile, BenutzerInfo, get_data_dir};
+    use crate::models::{PdfFile, BenutzerInfo, get_data_dir};
     use crate::db::GemarkungsBezirke;
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
@@ -126,8 +126,8 @@ pub mod upload {
         
         for neu in upload_changeset.data.neu.iter() {
         
-            let amtsgericht = &neu.titelblatt.amtsgericht;
-            let grundbuch = &neu.titelblatt.grundbuch_von;
+            let amtsgericht = &neu.analysiert.titelblatt.amtsgericht;
+            let grundbuch = &neu.analysiert.titelblatt.grundbuch_von;
             let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
                 if ag == amtsgericht && bezirk == grundbuch { Some(land.clone()) } else { None }
             });
@@ -150,7 +150,7 @@ pub mod upload {
                 Some(s) => s,
             };
             
-            let blatt = neu.titelblatt.blatt;
+            let blatt = neu.analysiert.titelblatt.blatt;
             let target_path = folder_path
                 .clone()
                 .join(land.clone())
@@ -172,8 +172,8 @@ pub mod upload {
 
         for geaendert in upload_changeset.data.geaendert.iter() {
             
-            let amtsgericht = &geaendert.neu.titelblatt.amtsgericht;
-            let grundbuch = &geaendert.neu.titelblatt.grundbuch_von;
+            let amtsgericht = &geaendert.neu.analysiert.titelblatt.amtsgericht;
+            let grundbuch = &geaendert.neu.analysiert.titelblatt.grundbuch_von;
 
             let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
                 if ag == amtsgericht && bezirk == grundbuch { Some(land.clone()) } else { None }
@@ -197,7 +197,7 @@ pub mod upload {
                 Some(s) => s,
             };
 
-            let blatt = geaendert.neu.titelblatt.blatt;
+            let blatt = geaendert.neu.analysiert.titelblatt.blatt;
             let target_path = folder_path
                 .clone()
                 .join(land.clone())
@@ -352,7 +352,7 @@ pub mod upload {
                 
         let geaendert_blaetter = upload_changeset.data.geaendert.iter()
             .map(|aenderung| { 
-                let tb = &aenderung.neu.titelblatt;  
+                let tb = &aenderung.neu.analysiert.titelblatt;  
                 format!("{}/{}/{}", tb.amtsgericht, tb.grundbuch_von, tb.blatt)
             })
             .collect::<BTreeSet<_>>();
@@ -366,8 +366,8 @@ pub mod upload {
         for blatt in upload_changeset.data.neu.iter() {
                     
             let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
-                if *ag == blatt.titelblatt.amtsgericht && 
-                   *bezirk == blatt.titelblatt.grundbuch_von { 
+                if *ag == blatt.analysiert.titelblatt.amtsgericht && 
+                   *bezirk == blatt.analysiert.titelblatt.grundbuch_von { 
                     Some(land.clone()) 
                 } else { 
                     None 
@@ -376,8 +376,8 @@ pub mod upload {
 
             let land = land.ok_or(format!(
                 "Kein Land für Grundbuch {}_{}.gbx gefunden", 
-                blatt.titelblatt.grundbuch_von, 
-                blatt.titelblatt.blatt
+                blatt.analysiert.titelblatt.grundbuch_von, 
+                blatt.analysiert.titelblatt.blatt
             ))?;
                 
             crate::index::add_grundbuchblatt_zu_index(&land, blatt, &index_writer, &grundbuch_schema)?;
@@ -386,8 +386,8 @@ pub mod upload {
         for blatt in upload_changeset.data.geaendert.iter() {
             
             let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
-                if *ag == blatt.neu.titelblatt.amtsgericht && 
-                *bezirk == blatt.neu.titelblatt.grundbuch_von { 
+                if *ag == blatt.neu.analysiert.titelblatt.amtsgericht && 
+                *bezirk == blatt.neu.analysiert.titelblatt.grundbuch_von { 
                     Some(land.clone()) 
                 } else { 
                     None 
@@ -396,8 +396,8 @@ pub mod upload {
 
             let land = land.ok_or(format!(
                 "Kein Land für Grundbuch {}_{}.gbx gefunden", 
-                blatt.neu.titelblatt.grundbuch_von, 
-                blatt.neu.titelblatt.blatt
+                blatt.neu.analysiert.titelblatt.grundbuch_von, 
+                blatt.neu.analysiert.titelblatt.blatt
             ))?;
             
 
@@ -431,7 +431,7 @@ pub mod upload {
 /// API für `/download` Anfragen
 pub mod download {
 
-    use crate::models::{AuthFormData, PdfFile, get_data_dir};
+    use crate::models::{PdfFile, get_data_dir};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
     use url_encoded_data::UrlEncodedData;
@@ -652,7 +652,7 @@ pub mod download {
 /// API für `/suche` Anfragen
 pub mod suche {
 
-    use crate::models::{AuthFormData, AbonnementInfo, PdfFile, Titelblatt, get_data_dir};
+    use crate::models::{AbonnementInfo, PdfFile, Titelblatt, get_data_dir};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use regex::Regex;
     use serde_derive::{Deserialize, Serialize};
