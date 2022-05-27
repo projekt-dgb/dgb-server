@@ -226,7 +226,7 @@ pub mod upload {
                 .body(
                     serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
                         UploadChangesetResponseError {
-                            code: 500,
+                            code: 501,
                             text: format!("Konnte Änderungstext nicht speichern: {e}"),
                         },
                     ))

@@ -2,7 +2,7 @@
 
 Server für digitale Grundbuch-Daten (.gbx)
 
-## API -Übersicht
+## API-Übersicht
 
 HTTP GET-API: `$url?email={email}&passwort={passwort}`:
 
@@ -199,7 +199,201 @@ unterzeichnet werden, wobei die Signatur separat übermittelt wird (Format siehe
 ```
 curl -X POST https://127.0.0.1/upload?email=max@mustermann.de&passwort=geheim123
    -H 'Content-Type: application/json'
-   -d '{"login":"my_login","password":"my_password"}'
+   -d 'ÄNDERUNG_JSON (siehe unten)'
 ```
 
+Hierbei ist `ÄNDERUNG_JSON` ein JSON-Objekt, das die Änderung beschreibt:
 
+- `titel`: String: Beschreibung der Änderung (Überschrift)
+- `beschreibung`: Array[String]: Ausführliche Beschreibung der Änderung (Zeilen)
+- `fingerprint`: String: Fingerprint (Schlüssel-ID) des PGP-Schlüssels, der für die Unterschrift verwendet wurde
+- `signatur`: Objekt: Signatur von `data` in JSON-Form (Format siehe Beispiel unten)
+    - `hash`: String: Hashfunktion die zur Unterschrift verwendet wurde (üblicherweise "SHA512")
+    - `pgp_signatur`: Array[String]: Zeilen zwischen "BEGIN PGP SIGNATURE" und "END PGP SIGNATURE"
+- `data`: Objekt:
+    - `neu`: Array[GbxDatei]: Enthält Dateien, die keinen alten Stand haben (z.B. neu angelegte Blätter)
+    - `geaendert`: Array[Objekt]:
+        - `alt`: GbxDatei: Der alte Stand der GBX-Datei vor der Änderung
+        - `neu`: GbxDatei: Der neue Stand der GBX-Datei nach der Änderung
+
+Beispiel: In einer neu angelegten Datei wird ein neuer BV-Eintrag eingefügt.
+Die leere GBX-Datei hat den Inhalt von:
+
+```json
+{
+  "gbx_datei_pfad": "",
+  "land": "Brandenburg",
+  "inhalt": {
+    "titelblatt": {
+      "amtsgericht": "Prenzlau",
+      "grundbuch_von": "Schenkenberg",
+      "blatt": 456
+    }
+  }
+}
+```
+
+Die geänderte Datei:
+
+```json
+{
+  "gbx_datei_pfad": "",
+  "land": "Brandenburg",
+  "inhalt": {
+    "titelblatt": {
+      "amtsgericht": "Prenzlau",
+      "grundbuch_von": "Schenkenberg",
+      "blatt": 456
+    },
+    "bestandsverzeichnis": {
+      "eintraege": [
+        {
+          "lfd_nr": 1,
+          "flur": 1,
+          "flurstueck": "26",
+          "bezeichnung": [
+            "Landwirtschaftsfläche"
+          ],
+          "groesse": {
+            "typ": "m",
+            "wert": {
+              "m2": 15035
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Die PGP-Nachricht muss dann so aussehen (Zeilenenden = CR/LF):
+
+```txt
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+{
+    "neu": [],
+    "geaendert": [
+        {
+            "alt": {
+                "gbx_datei_pfad": "",
+                "land": "Brandenburg",
+                "titelblatt": {
+                    "amtsgericht": "Prenzlau",
+                    "grundbuch_von": "Schenkenberg",
+                    "blatt": 456
+                },
+                "analysiert": {
+                  "titelblatt": {
+                      "amtsgericht": "Prenzlau",
+                      "grundbuch_von": "Schenkenberg",
+                      "blatt": 456
+                  }
+                }
+            },
+            "neu": {
+                "gbx_datei_pfad": "",
+                "land": "Brandenburg",
+                "titelblatt": {
+                    "amtsgericht": "Prenzlau",
+                    "grundbuch_von": "Schenkenberg",
+                    "blatt": 456
+                },
+                "analysiert": {
+                    "titelblatt": {
+                        "amtsgericht": "Prenzlau",
+                        "grundbuch_von": "Schenkenberg",
+                        "blatt": 456
+                    },
+                    "bestandsverzeichnis": {
+                        "eintraege": [
+                            {
+                                "lfd_nr": 1,
+                                "bisherige_lfd_nr": null,
+                                "flur": 1,
+                                "flurstueck": "26",
+                                "gemarkung": null,
+                                "bezeichnung": [
+                                    "Landwirtschaftsfläche"
+                                ],
+                                "groesse": {
+                                    "typ": "m",
+                                    "wert": {
+                                        "m2": 15035
+                              	    }
+                                },
+                                "automatisch_geroetet": null,
+                                "manuell_geroetet": null,
+                                "position_in_pdf": null
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    ]
+}
+-----BEGIN PGP SIGNATURE-----
+iD8DBQFFxqRFCMEe9B/8oqERAqA2A
+Tx4RziVzY4eR4Ms4MFsKAMqOoQCgg
+e5AJIRuLUIUikjNWQIW63QE=J9167
+=aAhry
+-----END PGP SIGNATURE-----
+```
+
+Die Beschreibung (Änderungsmitteilung) ist nicht Teil der Nachricht selber.
+
+Das fertige JSON-Objekt sieht dann so aus:
+
+```json
+{
+    "titel": "Meine Änderung 1",
+    "beschreibung": [
+        "Meine mehrzeilige",
+        "Beschreibung der Änderung"
+    ],
+    "fingerprint": "F554A3687412CFFEBDEFE0A312F5F7B42F2B01E7",
+    "signatur": {
+        "hash": "SHA256",
+        "pgp_signatur": [
+            "iD8DBQFFxqRFCMEe9B/8oqERAqA2A",
+            "Tx4RziVzY4eR4Ms4MFsKAMqOoQCgg",
+            "e5AJIRuLUIUikjNWQIW63QE=J9167",
+            "=aAhry"
+        ]
+    },
+    "data": {
+        "neu": [],
+        "geaendert": [
+            {
+                "alt": { ... }, /* siehe oben */
+                "neu": { ... }  /* siehe oben */
+            }
+        ]
+    }
+}
+```
+
+Nach dem Hochladen verifiziert der Server die Änderung gegen den öffentlichen
+Schlüssel (public key) und weist Änderungen zurück, die eine falsche Unterschrift
+besitzen.
+
+OK:
+
+Bei Übernahme der Änderung schickt der Sever als Bestätigung das `data`-Objekt
+nochmal zurück zur Überprüfung.
+
+- `status`: String: immer `"ok"`
+- `neu`: Array[GbxDatei]: siehe oben
+- `geaendert`: Array[GbxDatei]: siehe oben
+
+FEHLER:
+
+- `status`: String: immer `"error"`
+- `code`: Integer: Fehlercode
+    - 0: Benutzer / Passwort stimmt nicht
+    - 1: Amtsgericht / Gemarkungsbezirk nicht gefunden
+    - 500: Signatur stimmt nicht überein
+    - 501: Interner Fehler bei Übernahme der Änderung
+- `text`: String: Vorformatierter Fehlertext

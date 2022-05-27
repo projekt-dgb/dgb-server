@@ -317,6 +317,8 @@ fn init_logger() -> Result<(), String> {
     use std::path::Path;
     use crate::models::get_logs_dir;
     
+    let _ = std::fs::create_dir_all(get_logs_dir());
+
     let log_path = Path::new(&get_logs_dir()).join("log.json");
     
     let file = OpenOptions::new()
@@ -350,7 +352,7 @@ async fn main() -> std::io::Result<()> {
     match process_action(&action).await {
         Ok(_) => Ok(()),
         Err(e) => {
-            log::error!("Fehler: {action:?}:\r\n{e}");
+            println!("Fehler: {action:?}:\r\n{e}");
             Ok(())
         }
     }
