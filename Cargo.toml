@@ -13,7 +13,7 @@ serde_json = { version = "1.0.81", default-features = false, features = ["std"] 
 url_encoded_data = { version = "0.6.1", default-features = false, features = [] }
 lazy_static = { version = "1.4.0", default-features = false, features = [] }
 regex = { version = "1.5.6", default-features = false, features = ["std", "perf", "unicode"] }
-git2 = { version = "0.14.4", default-features = false, features = [] }
+git2 = { version = "0.13.4", default-features = false }
 clap = { version = "3.1.18", default-features = false, features = ["derive", "std", "env", "unicode", "wrap_help"] }
 printpdf = { version = "0.5.0", default-features = false, features = [] }
 sodiumoxide = { version = "0.2.7", default-features = false, features = [] }

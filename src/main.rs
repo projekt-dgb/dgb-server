@@ -76,16 +76,16 @@ pub enum ArgAction {
     /// Starte den Server (--ip, --smtp_host, --smtp_email, --smtp_passwort)
     Start {
         /// IP-Adresse, die der Server verwenden soll
-        #[clap(default_value = "127.0.0.1")]
+        #[clap(long, default_value = "127.0.0.1")]
         ip: String,
         /// E-Mail-Host um Grundbuchblätter rauszusenden
-        #[clap(default_value = "")]
+        #[clap(long, default_value = "")]
         smtp_host: String,
         /// E-Mail Konto, von dem Grundbuchblatt-Änderungen gesendet werden (SMTP)
-        #[clap(default_value = "")]
+        #[clap(long, default_value = "")]
         smtp_email: String,
         /// Passwort für SMTP E-Mail Konto für Grundbuchänderungen
-        #[clap(default_value = "")]
+        #[clap(long, default_value = "")]
         smtp_passwort: String,   
     },
     /// Starte die Indexierung der Grundbuchblätter als neuen Prozess

@@ -1,7 +1,14 @@
+# -*- mode: dockerfile -*-
 # syntax=docker/dockerfile:1.2
 
-FROM ubuntu:latest
+FROM rust:1.61.0-slim-bullseye as builder
 WORKDIR /dgb-server
-COPY target/x86_64-unknown-linux-musl/release/dgb-server .
+COPY . .
+RUN apt-get update && apt install -y gcc make build-essential && rm -rf /var/lib/apt/lists/*
+RUN cargo build --release
+
+FROM debian:bullseye-slim
+RUN apt-get update && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /dgb-server/target/release/dgb-server /usr/local/bin/dgb-server
 EXPOSE 8080
-CMD ["./dgb-server", "start" "--ip", "0.0.0.0"]
+CMD dgb-server start --ip 0.0.0.0
