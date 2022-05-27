@@ -297,6 +297,7 @@ async fn startup_http_server(ip: &str) -> std::io::Result<()> {
 
         App::new()
             .app_data(json_cfg)
+            .wrap(actix_web::middleware::Compress::default())
             .service(crate::api::status::status)
             .service(crate::api::suche::suche)
             .service(crate::api::download::download_gbx)
