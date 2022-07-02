@@ -1,13 +1,87 @@
 /// API für `/status` Anfragen
 pub mod status {
-    use actix_web::{get, HttpRequest, Responder, HttpResponse};
+    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
     
-    // Test, um status 
+    // Startseite
     #[get("/")]
     async fn status(req: HttpRequest) -> impl Responder {
         HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../index.html"))
+    }
+
+    // Seite mit API-Dokumentation
+    #[get("/api")]
+    async fn api(req: HttpRequest) -> impl Responder {
+        use comrak::{markdown_to_html, ComrakOptions};
+        let html = markdown_to_html(include_str!("../API.md"), &ComrakOptions::default());
+        let css = include_str!("../github-markdown-light.css");
+        let body = format!("<!DOCTYPE html><html><head><style>{css}</style></head><body>{html}</body></html>");
+        
+        HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(body)
+    }
+}
+
+pub mod login {
+    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+
+    // Login-Seite
+    #[get("/login")]
+    async fn login_get(req: HttpRequest) -> impl Responder {
+        HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body("")
+    }
+
+    // Login-Seite
+    #[post("/login")]
+    async fn login_post(req: HttpRequest) -> impl Responder {
+        HttpResponse::Ok()
+    }
+}
+
+pub mod konto {
+    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+
+    // Konto-Seite
+    #[get("/konto")]
+    async fn konto_get(req: HttpRequest) -> impl Responder {
+        HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body("")
+    }
+    
+    // Login-Seite
+    #[post("/konto")]
+    async fn konto_post(req: HttpRequest) -> impl Responder {
+        HttpResponse::Ok()
+    }
+}
+
+/// API für `/k8s` Anfragen: Gibt eine Status-Übersicht des k8s-clusters aus
+pub mod k8s {
+    use actix_web::{get, HttpRequest, Responder, HttpResponse};
+    
+    // Test, um k8s-status abzufragen
+    #[get("/k8s")]
+    async fn k8s(req: HttpRequest) -> impl Responder {
+
+        let body = match crate::k8s::k8s_get_peer_ips().await {
+            Ok(peers) => peers.join("\r\n"),
+            Err(e) => format!("{e}"),
+        };
+
+        let body = if crate::k8s::is_running_in_k8s().await {
+            format!("k8s available:\r\n\r\npeers:\r\n{body}")    
+        } else {
+            format!("k8s not available")
+        };
+
+        HttpResponse::Ok()
         .content_type("text/plain; charset=utf-8")
-        .body(include_str!("../API.md"))
+        .body(body)
     }
 }
 

@@ -1,64 +1,89 @@
-# dgb-server 
+# API
 
-Server für digitale Grundbuch-Daten (.gbx)
+Das folgende Dokument beschreibt die Übersicht über die 
+API des `dgb-server`.
 
-## API-Übersicht
+### Authentifizierung
 
-HTTP GET-API: `$url?email={email}&passwort={passwort}`:
+Um sich beim Server anzumelden, benötigt man ein Token, was
+im HTTP-Header `Authentication` gesendet wird. Um dieses Token
+zu generieren, muss eine Form-Anfrage mit `email` und `passwort`
+nach `/login` gePOSTet werden:
+
+#### Authentifizierung: Ok
+
+- `status`: String: immer `"error"`
+- `token`: String: Token, 30 Minuten lang gültig
+
+#### Authentifizierung: Fehler
+
+- `status`: String: immer `"error"`
+- `code`: Integer: Fehlercode
+    - 0: Benutzer nicht gefunden
+    - 500: Interner Fehler
+- `text`: String: Fehlermeldung vorformatiert als Text
+
+#### Beispiel einer Such-Anfrage
 
 ```
-/suche/{suchbegriff}
-
-/download/gbx/{amtsgericht}/{grundbuch_von}/{blatt}
-/download/pdf/{amtsgericht}/{grundbuch_von}/{blatt}
-
-/abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blatt}/{aktenzeichen}
-/abo-neu/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}/{aktenzeichen}
-
-/abo-loeschen/email/{amtsgericht}/{grundbuchbezirk}/{blatt}/{aktenzeichen}
-/abo-loeschen/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}/{aktenzeichen}
+POST /login HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+email=max@mustermann.de&passwort=abc123
 ```
-
-HTTP POST-API: `$url?email={email}&passwort={passwort}`:
-
 ```
-/upload
-```
-
-## Beispiel
-
-`curl https://127.0.0.1/suche/Suchbegriff?email=max@mustermann.de&passwort=geheim123`
-
-```json
 {
-  "status": "ok",
-  "grundbuecher": [],
-  "aenderungen": []
+    "status": "ok",
+    "token": "S0VLU0UhIExFQ0tFUiEK"
+}
+```
+```
+GET /suche/Mein%20Suchbegriff HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+```
+```
+{
+    "status": "ok",
+    "grundbuecher": [],
+    "aenderungen": []
 }
 ```
 
-oder: 
+### API-Übersicht
 
-```json
-{
-  "status": "error",
-  "code": 0,
-  "text": "Kein Benutzer für \"max@mustermann.de\" gefunden"
-}
-```
+- Suche: `GET /suche/{suchbegriff}`: Durchsucht die Grundbuchblätter und 
+  Änderungsmitteilungen nach `suchbegriff`
+- Download:
+    - `GET /download/gbx/{amtsgericht}/{grundbuch_von}/{blatt}`: 
+      gibt die .gbx (= JSON) Datei des Grundbuchblatts von `amtsgericht`, 
+      `grundbuch_von`, `blatt` als JSON aus
+    - `GET /download/pdf/{amtsgericht}/{grundbuch_von}/{blatt}`: 
+      gibt das Grundbuchblatt als PDF aus oder eine JSON-Fehlermeldung
+- Upload:
+    - `POST /upload`: Lädt eine Grundbuchänderung hoch (wenn Benutzerkonto + Signatur stimmen)
+- Abonnements: Bei einer Änderung des abonnierten Grundbuchblatts wird der 
+  entsprechede Webhook aktiviert bzw. eine E-Mail gesendet
+    - `POST /abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+    - `POST /abo-neu/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+    - `POST /abo-loeschen/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+    - `POST /abo-loeschen/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
 
-## API-Dokumentation
-
-### /suche
+### Suche
 
 Durchsucht Grundbuchblätter nach einem Suchbegriff
 
-`curl https://127.0.0.1/suche/Suchbegriff?email=max@mustermann.de&passwort=geheim123`
+URL: GET `/suche`
 
-OK:
+```
+GET https://127.0.0.1/suche/Suchbegriff HTTP/1.1
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+```
+
+#### Suchergebnis: Ok
 
 - `status`: String: immer `"ok"`
-- `grundbuecher`: Array[Objekt]: Grundbücher, die den Suchbegriff enthalten (max. 50 Ergebnisse)
+- `grundbuecher`: Array[Objekt]: Grundbücher, die den 
+   Suchbegriff enthalten (max. 50 Ergebnisse)
     - `titelblatt`: Objekt: Titelblatt des gefundenen Grundbuchs
         - `amtsgericht`: String: Amtsgericht des gefundenen Grundbuchs
         - `grundbuch_von`: String: Grundbuchblattbezirk des gefundenen Grundbuchs
@@ -85,14 +110,15 @@ OK:
             - `abt3-loeschungen`: Abteilung 3 (Löschungen)
         - `lfd_nr`: String: Laufende Nummer des gefundenen Texts
         - `text`: String: Gefundener Text
-    - `abos`: Array[Objekt]: Abonnements für dieses Grundbuchblatt (ein Blatt kann unter mehreren AZ abonniert sein)
+    - `abos`: Array[Objekt]: Abonnements für dieses Grundbuchblatt 
+      (ein Blatt kann unter mehreren Aktenzeichen abonniert sein)
         - `amtsgericht`: String: Amtsgericht des Abonnements
         - `grundbuchbezirk`: String: Grundbuchbezirk des Abonnements
         - `blatt`: String: Blatt-Nr. des Abonnements
         - `text`: String: E-Mail des Abonnenten (`= "max@mustermann.de"`)
         - `aktenzeichen`: String: Aktenzeichen des Abonnements
 
-FEHLER:
+#### Suchergebnis: Fehler
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode
@@ -100,15 +126,24 @@ FEHLER:
     - 500: Interner Fehler
 - `text`: String: Fehlermeldung vorformatiert als Text
 
-### /download/pdf/{amtsgericht}/{grundbuch_von}/{blatt}
+### Download (PDF)
+
+URL: GET `/download/pdf/{amtsgericht}/{grundbuch_von}/{blatt}`
 
 Rendert den momentanen Stand des Grundbuchs in eine PDF-Datei
 
-`curl https://127.0.0.1/download/pdf/Prenzlau/Schenkenberg/289?email=max@mustermann.de&passwort=geheim123`
+```
+GET https://127.0.0.1/download/pdf/Prenzlau/Schenkenberg/289 HTTP/1.1
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+```
 
-OK: PDF-Datei im Format `application/pdf`
+#### Download (PDF): Ok
 
-FEHLER: 
+PDF-Datei im Format `application/pdf`
+
+#### Download (PDF): Fehler
+
+JSON-Objekt mit den Feldern:
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode
@@ -118,18 +153,23 @@ FEHLER:
     - 500: Interner Fehler
 - `text`: String: Fehlermeldung vorformatiert als Text
 
-### /download/gbx/{amtsgericht}/{grundbuch_von}/{blatt}
+### Download (GBX)
+
+URL: GET `/download/gbx/{amtsgericht}/{grundbuch_von}/{blatt}`
 
 Gibt den momentanen Stand des Grundbuchs im JSON-Format (.gbx) zurück
 
-`curl https://127.0.0.1/download/pdf/Prenzlau/Schenkenberg/289?email=max@mustermann.de&passwort=geheim123`
+```
+GET https://127.0.0.1/download/gbx/Prenzlau/Schenkenberg/289 HTTP/1.1
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+```
 
-OK: 
+#### Download (GBX): Ok
 
 - `status`: String: immer `"ok"`
 - `datei`, `gbx_datei_pfad`, `titelblatt`, ...: GBX-Datei, Format siehe unten
 
-FEHLER: 
+#### Download (GBX): Fehler
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode
@@ -139,17 +179,34 @@ FEHLER:
     - 500: Interner Fehler
 - `text`: String: Fehlermeldung vorformatiert als Text
 
-### /abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blatt}/{aktenzeichen}/{email}
+### EMail-Abonnement neu anlegen
 
-Legt ein neues E-Mail-Abonnement für den Benutzer an
+Legt ein neues E-Mail-Abonnement für den Benutzer an (`aktenzeichen` ist optional)
 
-`curl https://127.0.0.1/abo-neu/email/Prenzlau/Schenkenberg/289/max@mustermann.de?email=max@mustermann.de&passwort=geheim123`
+URL: POST `/abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
 
-OK: 
+FORM: 
+
+    - `aktenzeichen`: Optional[String]: Aktenzeichen, was auf Benachrichtigungen bei 
+      Grundbuchänderungen an diesem Blatt später bei "Ihr Zeichen" / "Unser Zeichen" 
+      auftauchen wird.
+
+```
+POST https://127.0.0.1/abo-neu/email/Prenzlau/Schenkenberg/289 HTTP/1.1
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+Content-Type: application/x-www-form-urlencoded
+aktenzeichen=ABC%20DEF
+```
+
+Wenn das Grundbuchblatt jetzt geändert wird, wird der Benutzer, welcher die Anfrage
+gestellt hat, eine E-Mail mit Hinweis auf die Änderung erhalten, mit dem Hinweis auf
+das Aktenzeichen "ABC DEF".
+
+#### EMail-Abonnement neu anlegen: Ok
 
 - `status`: String: immer `"ok"`
 
-FEHLER: 
+#### EMail-Abonnement neu anlegen: Fehler
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode
@@ -157,19 +214,40 @@ FEHLER:
     - 500: Interner Fehler
 - `text`: String: Fehlermeldung vorformatiert als Text
 
+### EMail-Abonnement löschen
 
-### /abo-neu/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}/{aktenzeichen}
+Funktioniert genau wie "EMail-Abonnement anlegen", siehe oben
+
+URL: POST `/abo-loeschen/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+
+### Webhook neu anlegen
 
 Legt ein neues Webhook-Abonnement für den Benutzer an: In diesem Fall wird bei
 einer Änderung "https://meinwebhook.com:8080" benachrichtigt.
 
-`curl https://127.0.0.1/abo-neu/email/Prenzlau/Schenkenberg/289/meinwebhook.com:8080?email=max@mustermann.de&passwort=geheim123`
+URL: POST `/abo-neu/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
 
-OK: 
+FORM: 
+
+    - `url`: String: Server-URL, welche bei einer Grundbuchänderung angepingt wird
+    - `aktenzeichen`: Optional[String]: Aktenzeichen, was auf Benachrichtigungen bei 
+      Grundbuchänderungen an diesem Blatt später bei "Ihr Zeichen" / "Unser Zeichen" 
+      auftauchen wird.
+
+Achtung: Webhooks funktionieren aus Sicherheitsgründen nur mit HTTPS-Servern.
+
+```
+POST https://127.0.0.1/abo-neu/email/Prenzlau/Schenkenberg/289 HTTP/1.1
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+Content-Type: application/x-www-form-urlencoded
+aktenzeichen=ABC%20DEF&url=meinwebhook.com:8080
+```
+
+#### Webhook neu anlegen: Ok
 
 - `status`: String: immer `"ok"`
 
-FEHLER: 
+#### Webhook neu anlegen: Fehler
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode
@@ -177,29 +255,66 @@ FEHLER:
     - 500: Interner Fehler
 - `text`: String: Fehlermeldung vorformatiert als Text
 
-Webhook-JSON bei Änderung:
+#### Webhook-JSON bei Änderung
 
-AN: HTTP POST https://meinwebhook.com:8080
-
-INHALT: 
+Wenn eine Grundbuchänderung am Blatt `{amtsgericht}/{grundbuchbezirk}/{blatt}` 
+vorgenomment wird, wird die Änderung dem Webhook-Server gemeldet:
 
 - `server_url`: String: URL des Servers, von dem die Benachrichtigung gesendet wurde
 - `amtsgericht`: String: Amtsgericht des Grundbuchblatts, in dem die Änderung stattfand
 - `grundbuchbezirk`: String: Grundbuchbezirk des Grundbuchblatts, in dem die Änderung stattfand
 - `blatt`: String: Blatt-Nr., in dem die Änderung stattfand
 - `webhook`: String: URL des Webhooks, der benachrichtigt wurde
-- `aktenzeichen`: String: Aktenzeichen, unter dem das Abonnement geführt wird
+- `aktenzeichen`: Optional[String]: Aktenzeichen, unter dem das Abonnement geführt wird
 - `aenderungs_id`: String: Änderungs-ID der Grundbuchänderung (SHA1-Hash)
 
-### /upload
+Beispiel: 
+
+```
+POST https://meinwebhook.com:8080 HTTP/1.1
+Content-Type: application/json
+{
+    "server_url": "https://127.0.0.1",
+    "amtsgericht": "Prenzlau",
+    "grundbuchbezirk": "Schenkenberg",
+    "blatt": "289",
+    "webhook": "https://meinwebhook.com:8080",
+    "aktenzeichen": "ABC DEF",
+    "aenderungs_id": "c913905482d2d22befe3e0f85e93795cf8a998cc"
+}
+```
+
+### Webhook löschen
+
+Funktioniert genau wie "Webhook anlegen", siehe oben
+
+URL: POST `/abo-loeschen/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+
+#### Webhook löschen: Ok
+
+- `status`: String: immer `"ok"`
+
+####  Webhook löschen: Fehler
+
+- `status`: String: immer `"error"`
+- `code`: Integer: FehlercodeFORM: 
+    - 0: Benutzer nicht gefunden
+    - 500: Interner Fehler
+- `text`: String: Fehlermeldung vorformatiert als Text
+
+### Upload
 
 Lädt eine neue Datei hoch. Hierbei muss das JSON der Änderung mit einem privaten Schlüssel
 unterzeichnet werden, wobei die Signatur separat übermittelt wird (Format siehe unten).
 
+URL: POST `/upload`
+
 ```
-curl -X POST https://127.0.0.1/upload?email=max@mustermann.de&passwort=geheim123
-   -H 'Content-Type: application/json'
-   -d 'ÄNDERUNG_JSON (siehe unten)'
+POST https://127.0.0.1/upload HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
+
+ÄNDERUNG_JSON (siehe unten)
 ```
 
 Hierbei ist `ÄNDERUNG_JSON` ein JSON-Objekt, das die Änderung beschreibt:
@@ -211,8 +326,9 @@ Hierbei ist `ÄNDERUNG_JSON` ein JSON-Objekt, das die Änderung beschreibt:
     - `hash`: String: Hashfunktion die zur Unterschrift verwendet wurde (üblicherweise "SHA512")
     - `pgp_signatur`: Array[String]: Zeilen zwischen "BEGIN PGP SIGNATURE" und "END PGP SIGNATURE"
 - `data`: Objekt:
-    - `neu`: Array[GbxDatei]: Enthält Dateien, die keinen alten Stand haben (z.B. neu angelegte Blätter)
-    - `geaendert`: Array[Objekt]:
+    - `neu`: Optional[Array[GbxDatei]]: Enthält Dateien, 
+       die keinen alten Stand haben (z.B. neu angelegte Blätter)
+    - `geaendert`: Optional[Array[Objekt]]:
         - `alt`: GbxDatei: Der alte Stand der GBX-Datei vor der Änderung
         - `neu`: GbxDatei: Der neue Stand der GBX-Datei nach der Änderung
 
@@ -221,7 +337,7 @@ Die leere GBX-Datei hat den Inhalt von:
 
 ```json
 {
-  "gbx_datei_pfad": "",
+  "digitalisiert": false,
   "land": "Brandenburg",
   "inhalt": {
     "titelblatt": {
@@ -237,7 +353,7 @@ Die geänderte Datei:
 
 ```json
 {
-  "gbx_datei_pfad": "",
+  "digitalisiert": false,
   "land": "Brandenburg",
   "inhalt": {
     "titelblatt": {
@@ -254,12 +370,7 @@ Die geänderte Datei:
           "bezeichnung": [
             "Landwirtschaftsfläche"
           ],
-          "groesse": {
-            "typ": "m",
-            "wert": {
-              "m2": 15035
-            }
-          }
+          "groesse": 15035,
         }
       ]
     }
@@ -267,40 +378,30 @@ Die geänderte Datei:
 }
 ```
 
-Die PGP-Nachricht muss dann so aussehen (Zeilenenden = CR/LF):
+Die PGP-Nachricht muss dann so aussehen (Zeilenenden = CR/LF, 
+eingerückt mit 4 Leerzeichen):
 
 ```txt
 -----BEGIN PGP SIGNED MESSAGE-----
 Hash: SHA256
 {
-    "neu": [],
     "geaendert": [
         {
             "alt": {
-                "gbx_datei_pfad": "",
+                "digitalisiert": false,
                 "land": "Brandenburg",
-                "titelblatt": {
-                    "amtsgericht": "Prenzlau",
-                    "grundbuch_von": "Schenkenberg",
-                    "blatt": 456
-                },
-                "analysiert": {
-                  "titelblatt": {
-                      "amtsgericht": "Prenzlau",
-                      "grundbuch_von": "Schenkenberg",
-                      "blatt": 456
-                  }
+                "inhalt": {
+                    "titelblatt": {
+                        "amtsgericht": "Prenzlau",
+                        "grundbuch_von": "Schenkenberg",
+                        "blatt": 456
+                    }
                 }
             },
             "neu": {
-                "gbx_datei_pfad": "",
+                "digitalisiert": false,
                 "land": "Brandenburg",
-                "titelblatt": {
-                    "amtsgericht": "Prenzlau",
-                    "grundbuch_von": "Schenkenberg",
-                    "blatt": 456
-                },
-                "analysiert": {
+                "inhalt": {
                     "titelblatt": {
                         "amtsgericht": "Prenzlau",
                         "grundbuch_von": "Schenkenberg",
@@ -310,22 +411,12 @@ Hash: SHA256
                         "eintraege": [
                             {
                                 "lfd_nr": 1,
-                                "bisherige_lfd_nr": null,
                                 "flur": 1,
                                 "flurstueck": "26",
-                                "gemarkung": null,
                                 "bezeichnung": [
-                                    "Landwirtschaftsfläche"
+                                "Landwirtschaftsfläche"
                                 ],
-                                "groesse": {
-                                    "typ": "m",
-                                    "wert": {
-                                        "m2": 15035
-                              	    }
-                                },
-                                "automatisch_geroetet": null,
-                                "manuell_geroetet": null,
-                                "position_in_pdf": null
+                                "groesse": 15035,
                             }
                         ]
                     }
@@ -342,9 +433,8 @@ e5AJIRuLUIUikjNWQIW63QE=J9167
 -----END PGP SIGNATURE-----
 ```
 
-Die Beschreibung (Änderungsmitteilung) ist nicht Teil der Nachricht selber.
-
-Das fertige JSON-Objekt sieht dann so aus:
+Die Beschreibung (Änderungsmitteilung) ist nicht Teil der 
+Nachricht selber. Das fertige JSON-Objekt sieht dann so aus:
 
 ```json
 {
@@ -364,7 +454,6 @@ Das fertige JSON-Objekt sieht dann so aus:
         ]
     },
     "data": {
-        "neu": [],
         "geaendert": [
             {
                 "alt": { ... }, /* siehe oben */
@@ -379,16 +468,11 @@ Nach dem Hochladen verifiziert der Server die Änderung gegen den öffentlichen
 Schlüssel (public key) und weist Änderungen zurück, die eine falsche Unterschrift
 besitzen.
 
-OK:
-
-Bei Übernahme der Änderung schickt der Sever als Bestätigung das `data`-Objekt
-nochmal zurück zur Überprüfung.
+#### Upload: Ok
 
 - `status`: String: immer `"ok"`
-- `neu`: Array[GbxDatei]: siehe oben
-- `geaendert`: Array[GbxDatei]: siehe oben
 
-FEHLER:
+#### Upload: Fehler
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode

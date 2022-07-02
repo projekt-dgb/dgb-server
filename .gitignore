@@ -2,3 +2,4 @@
 /data/certbot
 *.pdf
 *.txt
+/k8s

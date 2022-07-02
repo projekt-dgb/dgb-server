@@ -30,6 +30,9 @@ log = { version = "0.4.17", default-features = false, features = ["max_level_tra
 slog = { version = "2.7.0", default-features = false, features = ["max_level_trace", "release_max_level_debug"] }
 slog-json = { version = "2.6.1", default-features = false, features = [] }
 slog-async = { version = "2.7.0", default-features = false, features = [] }
+kube = { version = "0.73.1", default-features = false, features = ["client", "rustls-tls", "gzip", "config"] }
+k8s-openapi = { version = "0.15.0", default-features = false, features = ["v1_23"] }
+comrak = { version = "0.13.1", default-features = false, features = [] }
 
 [dependencies.lettre]
 version = "0.10.0-rc.6"

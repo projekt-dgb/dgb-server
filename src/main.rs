@@ -61,6 +61,7 @@ pub mod email;
 pub mod index;
 pub mod pdf;
 pub mod suche;
+pub mod k8s;
 
 /// Server für .gbx-Dateien, läuft auf 127.0.0.1:8080
 #[derive(clap::Parser, Debug)]
@@ -299,13 +300,19 @@ async fn startup_http_server(ip: &str) -> std::io::Result<()> {
             .app_data(json_cfg)
             .wrap(actix_web::middleware::Compress::default())
             .service(crate::api::status::status)
+            .service(crate::api::status::api)
+            .service(crate::api::login::login_get)
+            .service(crate::api::login::login_post)
+            .service(crate::api::konto::konto_get)
+            .service(crate::api::konto::konto_post)
+            .service(crate::api::k8s::k8s)
             .service(crate::api::suche::suche)
             .service(crate::api::download::download_gbx)
             .service(crate::api::download::dowload_pdf)
             .service(crate::api::upload::upload)
             .service(crate::api::abo::abo_neu)
             .service(crate::api::abo::abo_loeschen)
-    })
+        })
     .bind((ip, 8080))?
     .run()
     .await
