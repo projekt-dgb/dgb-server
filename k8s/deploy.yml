@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dgb-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dgb-server
+  template:
+    metadata:
+      labels:
+        app: dgb-server
+    spec:
+      containers:
+        - name: server
+          image: grundbuch/dgb-server:latest
+          imagePullPolicy: Always
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+          - containerPort: 8080
+          env: 
+            - name: ROOT_EMAIL
+              valueFrom: 
+                secretKeyRef: 
+                  name: root-access 
+                  key: email 
+            - name: ROOT_PASSWORT 
+              valueFrom: 
+                secretKeyRef: 
+                  name: root-access 
+                  key: passwort 
+            - name: SMTP_HOST 
+              valueFrom: 
+                secretKeyRef: 
+                  name: root-access 
+                  key: smtp-host 
+            - name: SMTP_EMAIL
+              valueFrom: 
+                secretKeyRef: 
+                  name: root-access 
+                  key: smtp-email
+            - name: SMTP_PASSWORT
+              valueFrom: 
+                secretKeyRef: 
+                  name: root-access 
+                  key: smtp-passwort  
+      imagePullSecrets:
+        - name: registrypullsecret
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dgb-loadbalancer
+  labels:
+    app: dgb-loadbalancer
+spec:
+  type: LoadBalancer  
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: dgb-server
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dgb-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  rules:
+    - host: grundbuch-test.eu
+      http:
+        paths:
+          - path: /*
+            pathType: Prefix
+            backend:
+              service:
+                name: dgb-loadbalancer
+                port:
+                  number: 80
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory 
+    privateKeySecretRef:
+      name: letsencrypt
+    solvers:
+    - dns01:
+        cloudflare:
+          email: felix@wasmer.io
+          apiTokenSecretRef:
+            name: cloudflare-api-token
+            key: api-token---
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: crt
+spec:
+  secretName: tls-secret
+  issuerRef:
+    kind: Issuer
+    name: letsencrypt
+  commonName: grundbuch-test.eu
+  dnsNames:
+  - "grundbuch-test.eu"
