@@ -1,3 +1,36 @@
+use actix_web::{HttpRequest, HttpResponse};
+use crate::models::BenutzerInfo;
+
+async fn get_benutzer_from_httpauth(req: &HttpRequest) -> Result<BenutzerInfo, HttpResponse> {
+    use self::upload::{UploadChangesetResponse, UploadChangesetResponseError};
+    get_benutzer_from_httpauth_inner(req).await
+    .map_err(|e| {
+        let json = serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+            UploadChangesetResponseError {
+                code: 0,
+                text: format!("Fehler bei Authentifizierung: {e}"),
+            },
+        ))
+        .unwrap_or_default();
+
+        return HttpResponse::Ok()
+            .content_type("application/json")
+            .body(json);
+    })
+}
+
+async fn get_benutzer_from_httpauth_inner(req: &HttpRequest) -> Result<BenutzerInfo, String> {
+    use actix_web_httpauth::extractors::bearer::BearerAuth;
+    use actix_web::FromRequest;
+
+    let bearer = BearerAuth::extract(req).await
+    .map_err(|e| format!("{e}"))?;
+
+    let user = crate::db::get_user_from_token(bearer.token())?;
+
+    Ok(user)
+}
+
 /// API für `/status` Anfragen
 pub mod status {
     use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
@@ -5,11 +38,11 @@ pub mod status {
     // Startseite
     #[get("/")]
     async fn status(req: HttpRequest) -> impl Responder {
-        let css = include_str!("../style.css");
+        let css = include_str!("../web/style.css");
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(include_str!("../index.html").replace("<!-- CSS -->", &css))
+        .body(include_str!("../web/index.html").replace("<!-- CSS -->", &css))
     }
 
     // Seite mit API-Dokumentation
@@ -18,8 +51,8 @@ pub mod status {
         use comrak::{markdown_to_html, ComrakOptions};
         let html = markdown_to_html(include_str!("../API.md"), &ComrakOptions::default());
         let css = concat!(
-            include_str!("../github-markdown-light.css"), 
-            include_str!("../style.css")
+            include_str!("../web/github-markdown-light.css"), 
+            include_str!("../web/style.css")
         );
         let body = format!("
             <!DOCTYPE html>
@@ -51,15 +84,16 @@ pub mod login {
 
     use actix_web::{get, post, web, HttpRequest, Responder, HttpResponse};
     use serde_derive::{Serialize, Deserialize};
+    use chrono::{DateTime, Utc};
 
     // Login-Seite
     #[get("/login")]
     async fn login_get(req: HttpRequest) -> impl Responder {
-        let css = include_str!("../style.css");
+        let css = include_str!("../web/style.css");
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(include_str!("../login.html").replace("<!-- CSS -->", &css))
+        .body(include_str!("../web/login.html").replace("<!-- CSS -->", &css))
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +111,7 @@ pub mod login {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct LoginResponseOk {
         token: String,
+        valid_until: DateTime<Utc>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,21 +123,70 @@ pub mod login {
     // Login-Seite
     #[post("/login")]
     async fn login_post(form: web::Form<LoginForm>, req: HttpRequest) -> impl Responder {
+        
+        let response = match crate::db::create_login_user_token(&form.email, &form.passwort) {
+            Ok((_info, token, valid_until)) => LoginResponse::Ok(LoginResponseOk {
+                token,
+                valid_until, 
+            }),
+            Err(e) => {
+                LoginResponse::Error(LoginResponseError {
+                    code: 0,
+                    text: e.clone(),
+                })
+            }
+        };
+
         HttpResponse::Ok()
+        .content_type("application/json; charset=utf-8")
+        .body(serde_json::to_string_pretty(&response).unwrap_or_default())
     }
 }
 
 pub mod konto {
     use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+    use serde_derive::{Serialize, Deserialize};
 
     // Konto-Seite
     #[get("/konto")]
     async fn konto_get(req: HttpRequest) -> impl Responder {
+
+        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+            Ok(o) => o,
+            Err(_) => { 
+                return HttpResponse::Found()
+                .append_header(("Location", "/login"))
+                .finish(); 
+            },
+        };
+
+        let konto_data = match crate::db::get_konto_data(&benutzer) {
+            Ok(b) => b,
+            Err(_) => {
+                return HttpResponse::Found()
+                    .append_header(("Location", "/login"))
+                    .finish();
+            }
+        };
+
+        let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
+        let html = include_str!("../web/konto.html")
+        .replace("<!-- CSS -->", &format!("<style>{}</style>", include_str!("../web/style.css")))
+        .replace("data-konto-daten=\"{}\"", &format!("data-konto-daten=\'{}\'", konto_data_json));
+
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body("")
+        .body(html)
     }
     
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct KontoJsonPost {
+        pub tabelle: String,
+        #[serde(default)]
+        pub ids: Vec<usize>,
+        pub action: String,
+    }
+
     // Login-Seite
     #[post("/konto")]
     async fn konto_post(req: HttpRequest) -> impl Responder {
@@ -205,22 +289,9 @@ pub mod upload {
         use std::path::Path;
         
         let upload_changeset = &*upload_changeset;
-        
-        let benutzer = match crate::db::validate_user(&req.query_string()) {
+        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
-            Err(e) => {
-                let json = serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                    UploadChangesetResponseError {
-                        code: 0,
-                        text: format!("Fehler bei Authentifizierung: {e}"),
-                    },
-                ))
-                .unwrap_or_default();
-
-                return HttpResponse::Ok()
-                    .content_type("application/json")
-                    .body(json);
-            }
+            Err(e) => { return e; },
         };
         
         if let Err(e) = verify_signature(&benutzer.email, &upload_changeset) {
@@ -584,23 +655,10 @@ pub mod download {
         req: HttpRequest,
     ) -> impl Responder {
         
-        let _benutzer = match crate::db::validate_user(&req.query_string()) {
+        let _benutzer = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
-            Err(e) => {
-                let json = serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(
-                    PdfFileNichtVorhanden {
-                        code: 0,
-                        text: format!("Fehler bei Authentifizierung: {e}"),
-                    },
-                ))
-                .unwrap_or_default();
-
-                return HttpResponse::Ok()
-                    .content_type("application/json")
-                    .body(json);
-            }
+            Err(e) => { return e; },
         };
-
         let (amtsgericht, grundbuch_von, blatt) = &*path;
         let mut amtsgericht = amtsgericht.clone();
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
@@ -659,23 +717,10 @@ pub mod download {
         req: HttpRequest,
     ) -> impl Responder {
         
-        let _benutzer = match crate::db::validate_user(&req.query_string()) {
+        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
-            Err(e) => {
-                let json = serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(
-                    PdfFileNichtVorhanden {
-                        code: 0,
-                        text: format!("Fehler bei Authentifizierung: {e}"),
-                    },
-                ))
-                .unwrap_or_default();
-
-                return HttpResponse::Ok()
-                    .content_type("application/json")
-                    .body(json);
-            }
+            Err(e) => { return e; },
         };
-
         let (amtsgericht, grundbuch_von, blatt) = &*path;
         let mut amtsgericht = amtsgericht.clone();
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
@@ -827,23 +872,10 @@ pub mod suche {
     #[get("/suche/{suchbegriff}")]
     async fn suche(suchbegriff: web::Path<String>, req: HttpRequest) -> impl Responder {
         
-        let benutzer = match crate::db::validate_user(&req.query_string()) {
+        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
-            Err(e) => {
-                let json = serde_json::to_string_pretty(&GrundbuchSucheResponse::StatusErr(
-                    GrundbuchSucheError {
-                        code: 0,
-                        text: e.clone(),
-                    },
-                ))
-                .unwrap_or_default();
-
-                return HttpResponse::Ok()
-                    .content_type("application/json")
-                    .body(json);
-            }
+            Err(e) => { return e; },
         };
-        
         let folder_path = get_data_dir();
         let suchbegriff = &*suchbegriff;
         
@@ -955,89 +987,82 @@ pub mod abo {
         text: String,
     }
 
-    #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}/{email}")]
-    async fn abo_neu(tag: web::Path<(String, String, String, usize, String, String)>, req: HttpRequest) -> impl Responder {
-        
-        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag, email) = &*tag;
-        
-        let benutzer = match crate::db::validate_user(&req.query_string()) {
-            Ok(o) => o,
-            Err(e) => {
-                let json = serde_json::to_string_pretty(&AboNeuAnfrage::Err(
-                    AboNeuAnfrageErr {
-                        code: 0,
-                        text: e.clone(),
-                    },
-                ))
-                .unwrap_or_default();
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct AboNeuForm {
+        tag: Option<String>
+    }
 
-                return HttpResponse::Ok()
-                    .content_type("application/json")
-                    .body(json);
-            }
+    #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}")]
+    async fn abo_neu(
+        path: web::Path<(String, String, String, usize)>, 
+        form: web::Json<AboNeuForm>, 
+        req: HttpRequest,
+    ) -> impl Responder {
+        
+        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+            Ok(o) => o,
+            Err(e) => { return e; },
         };
-        
-        if email_oder_webhook == "email" && email != benutzer.email.as_str() {
-            return HttpResponse::Ok()
-                .content_type("application/json")
-                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
-                    code: 1,
-                    text: format!("E-Mail des Abonnements und E-Mail der Authentifizierung stimmen nicht überein"),
-                }))
-                .unwrap_or_default());
-        }
-        
-        if let Err(e) = crate::db::create_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &email, &tag) {
-                return HttpResponse::Ok()
-                .content_type("application/json")
-                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt) = &*path;
+        let abo = crate::db::create_abo(
+            &email_oder_webhook, 
+            &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), 
+            &benutzer.email, 
+            form.tag.as_ref().map(|s| s.as_str())
+        );
+
+        let json = match abo {
+            Ok(()) => {
+                serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { })).unwrap_or_default()
+            },
+            Err(e) => {
+                serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
                     code: 500,
                     text: format!("{e}"),
-                }))
-                .unwrap_or_default());
-        }
-        
-        return HttpResponse::Ok()
-        .content_type("application/json")
-        .body(serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { }))
-        .unwrap_or_default());
-    }
-    
-    #[get("/abo-loeschen/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}/{tag}")]
-    async fn abo_loeschen(tag: web::Path<(String, String, String, usize, String)>, req: HttpRequest) -> impl Responder {
-        
-        let benutzer = match crate::db::validate_user(&req.query_string()) {
-            Ok(o) => o,
-            Err(e) => {
-                let json = serde_json::to_string_pretty(&AboNeuAnfrage::Err(
-                    AboNeuAnfrageErr {
-                        code: 0,
-                        text: e.clone(),
-                    },
-                ))
-                .unwrap_or_default();
-
-                return HttpResponse::Ok()
-                    .content_type("application/json")
-                    .body(json);
+                })).unwrap_or_default()
             }
         };
+
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .body(json)
+    }
     
-        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt, tag) = &*tag;
+    #[get("/abo-loeschen/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}")]
+    async fn abo_loeschen(
+        path: web::Path<(String, String, String, usize)>, 
+        form: web::Json<AboNeuForm>, 
+        req: HttpRequest,
+    ) -> impl Responder {
         
-        if let Err(e) = crate::db::delete_abo(&email_oder_webhook, &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), &benutzer.email, &tag) {
-                return HttpResponse::Ok()
-                .content_type("application/json")
-                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+            Ok(o) => o,
+            Err(e) => { return e; },
+        };
+        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt) = &*path;
+        
+        let abo = crate::db::delete_abo(
+            &email_oder_webhook, 
+            &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), 
+            &benutzer.email, 
+            form.tag.as_ref().map(|s| s.as_str())
+        );
+
+        let json = match abo {
+            Err(e) => {
+                serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
                     code: 0,
                     text: format!("{e}"),
-                }))
-                .unwrap_or_default());
-        }
+                })).unwrap_or_default()
+            },
+            Ok(()) => {
+                serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { }))
+                .unwrap_or_default()
+            }
+        };
         
-        return HttpResponse::Ok()
+        HttpResponse::Ok()
         .content_type("application/json")
-        .body(serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { }))
-        .unwrap_or_default());
+        .body(json)
     }
 }

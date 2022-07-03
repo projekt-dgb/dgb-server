@@ -39,7 +39,7 @@ pub struct AboWebhookInfo {
     pub grundbuchbezirk: String,
     pub blatt: i32,
     pub webhook: String,
-    pub aktenzeichen: String,
+    pub aktenzeichen: Option<String>,
     pub aenderungs_id: String,
 }
 
@@ -58,11 +58,12 @@ pub fn send_change_email(server_url: &str, abo: &AbonnementInfo, commit_id: &str
         aktenzeichen,
     } = abo;
     
+    let aktenzeichen = aktenzeichen.clone().unwrap_or_default(); // TODO
     let email = text;
     let email_url = urlencoding::encode(text);
     let amtsgericht_url = urlencoding::encode(amtsgericht);
     let grundbuchbezirk_url = urlencoding::encode(grundbuchbezirk);
-    let aktenzeichen_url = urlencoding::encode(aktenzeichen);
+    let aktenzeichen_url = urlencoding::encode(&aktenzeichen);
     
     let html = format!("<!DOCTYPE html>
     <html lang=\"de\">SmtpClient

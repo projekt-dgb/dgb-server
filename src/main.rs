@@ -187,7 +187,7 @@ pub struct AboNeuArgs {
 
     /// Aktenzeichen für das neue Abo
     #[clap(short, long)]
-    pub aktenzeichen: String,
+    pub aktenzeichen: Option<String>,
 }
 
 #[derive(clap::Parser, Debug, PartialEq)]
@@ -208,7 +208,7 @@ pub struct AboLoeschenArgs {
 
     /// Aktenzeichen des Abonnements
     #[clap(short, long)]
-    pub aktenzeichen: String,
+    pub aktenzeichen: Option<String>,
 }
 
 pub async fn process_action(action: &ArgAction) -> Result<(), String> {
@@ -261,13 +261,13 @@ pub async fn process_action(action: &ArgAction) -> Result<(), String> {
             blatt,
             email,
             aktenzeichen,
-        }) => crate::db::create_abo(typ, blatt, email, aktenzeichen),
+        }) => crate::db::create_abo(typ, blatt, email, aktenzeichen.as_ref().map(|s| s.as_str())),
         AboLoeschen(AboLoeschenArgs {
             typ,
             blatt,
             email,
             aktenzeichen,
-        }) => crate::db::delete_abo(typ, blatt, email, aktenzeichen),
+        }) => crate::db::delete_abo(typ, blatt, email, aktenzeichen.as_ref().map(|s| s.as_str())),
     }
 }
 

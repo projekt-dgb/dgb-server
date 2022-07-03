@@ -2,6 +2,9 @@
 
 use rusqlite::{Connection, OpenFlags};
 use crate::models::{BenutzerInfo, AbonnementInfo, get_db_path, get_keys_dir};
+use chrono::{DateTime, Utc};
+use serde_derive::{Serialize, Deserialize};
+use std::collections::BTreeMap;
 
 pub type GemarkungsBezirke = Vec<(String, String, String)>;
 
@@ -53,7 +56,7 @@ pub fn create_database() -> Result<(), rusqlite::Error> {
             amtsgericht      VARCHAR(255) NOT NULL,
             bezirk           VARCHAR(255) NOT NULL,
             blatt            INTEGER NOT NULL,
-            aktenzeichen     VARCHAR(1023) NOT NULL
+            aktenzeichen     VARCHAR(1023)
         )",
         [],
     )?;
@@ -233,22 +236,18 @@ fn create_gpg_key(name: &str, email: &str) -> Result<(String, String), String> {
     Ok((fingerprint.to_string(), public_key_str))
 }
 
-
 pub fn get_key_for_fingerprint(fingerprint: &str, email: &str) -> Result<sequoia_openpgp::Cert, String> {
     
     use sequoia_openpgp::parse::PacketParser;
     use sequoia_openpgp::Cert;
     use sequoia_openpgp::parse::Parse;
     
-    println!("opening connection to db: {}", get_db_path());
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
     
     let mut stmt = conn
         .prepare("SELECT pubkey FROM publickeys WHERE email = ?1 AND fingerprint = ?2")
         .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
-
-    println!("stmt ok!");
     
     let pubkeys = stmt
         .query_map(rusqlite::params![email, fingerprint], |row| {
@@ -257,41 +256,110 @@ pub fn get_key_for_fingerprint(fingerprint: &str, email: &str) -> Result<sequoia
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
         .collect::<Vec<_>>();
 
-    println!("pubkeys ok!");
-
     let pubkey = match pubkeys.get(0) {
         Some(Ok(s)) => s,
         _ => return Err(format!("Kein öffentlicher Schlüssel für E-Mail {email:?} / Fingerprint {fingerprint:?} gefunden")),
     };
-    
-    println!("get_key_for_fingerprint: {email}:\r\n{pubkey}");
-    
+        
     let ppr = PacketParser::from_bytes(pubkey.as_bytes())
         .map_err(|e| format!("{e}"))?;
     
     let cert = Cert::try_from(ppr)
         .map_err(|e| format!("{e}"))?;
     
-    println!("ok cert created!");
-    
     Ok(cert)
 }
 
-pub fn validate_user(query_string: &str) -> Result<BenutzerInfo, String> {
-    use url_encoded_data::UrlEncodedData;
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct KontoData {
+    pub data: BTreeMap<String, Vec<String>>,
+}
 
-    let auth = UrlEncodedData::parse_str(query_string);
+pub fn get_konto_data(benutzer: &BenutzerInfo) -> Result<KontoData, String> {
+
+    let mut data = KontoData::default();
+    let conn = Connection::open(get_db_path())
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    match benutzer.rechte.as_str() {
+        "admin" => {
+
+        },
+        "bearbeiter" => {
+
+        },
+        _ => { },
+    }
+
+    Ok(data)
+}
+
+pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
     
-    let email = auth
-        .get_first("email")
-        .map(|s| s.to_string())
-        .ok_or(format!("Keine E-Mail Adresse angegeben"))?;
+    let conn = Connection::open(get_db_path())
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT id, gueltig_bis FROM sessions WHERE token = ?1")
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
     
-    let passwort = auth
-        .get_first("passwort")
-        .map(|s| s.to_string())
-        .ok_or(format!("Kein Passwort angegeben"))?;
+    let tokens = stmt
+        .query_map(rusqlite::params![token], |row| {
+            Ok((
+                row.get::<usize, i32>(0)?,
+                row.get::<usize, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .collect::<Vec<_>>();
+
     
+    let result = tokens.get(0)
+    .and_then(|t| t.as_ref().ok().and_then(|(id, g)| Some((id, DateTime::parse_from_rfc3339(&g).ok()?))));
+    
+    let id = match result {
+        Some((id, gueltig_bis)) => {
+            let now = Utc::now();
+            if now > gueltig_bis {
+                return Err(format!("Token abgelaufen"));
+            }
+            id
+        },
+        None => { return Err(format!("Ungültiges Token")); }
+    };
+
+    let mut stmt = conn
+        .prepare("SELECT name, email, rechte FROM benutzer WHERE id = ?1")
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+    
+    let benutzer = stmt
+    .query_map(rusqlite::params![id], |row| {
+        Ok((
+            row.get::<usize, String>(1)?,
+            row.get::<usize, String>(2)?,
+            row.get::<usize, String>(3)?,
+        ))
+    })
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+    .collect::<Vec<_>>();
+
+    let (name, email, rechte) = match benutzer.get(0) {
+        Some(Ok(s)) => s,
+        _ => return Err(format!("Kein Benutzerkonto für Token vorhanden")),
+    };
+
+    Ok(BenutzerInfo { 
+        id: *id, 
+        name: name.to_string(), 
+        email: email.to_string(), 
+        rechte: rechte.to_string(), 
+    })
+}
+
+pub fn create_login_user_token(email: &str, passwort: &str) -> Result<(BenutzerInfo, String, DateTime<Utc>), String> {
+    
+    use uuid::Uuid;
+
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -314,19 +382,51 @@ pub fn validate_user(query_string: &str) -> Result<BenutzerInfo, String> {
 
     let (id, name, email, rechte, pw) = match benutzer.get(0) {
         Some(Ok(s)) => s,
-        _ => return Err(format!("Kein Benutzer für \"{email}\" gefunden")),
+        _ => return Err(format!("Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden")),
     };
 
     if !verify_password(&pw, &passwort) {
         return Err(format!("Ungültiges Passwort"));
     }
 
-    Ok(BenutzerInfo {
+    let info = BenutzerInfo {
         id: *id,
         name: name.clone(),
         email: email.clone(),
         rechte: rechte.clone(),
-    })
+    };
+
+    let mut stmt = conn
+        .prepare("SELECT token, gueltig_bis FROM sessions WHERE id = ?1")
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+    
+    let tokens = stmt
+        .query_map(rusqlite::params![info.id], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+                row.get::<usize, String>(1)?,
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .collect::<Vec<_>>();
+
+    
+    if let Some((token, gueltig_bis)) = tokens.get(0)
+    .and_then(|t| t.as_ref().ok().and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)))) {
+        return Ok((info, token.clone(), gueltig_bis.into()));
+    }
+
+    let gueltig_bis = Utc::now();
+    let gueltig_bis = gueltig_bis.checked_add_signed(chrono::Duration::minutes(30)).unwrap_or(gueltig_bis);
+    let token = Uuid::new_v4();
+    let token = format!("{token}");
+
+    conn.execute(
+        "INSERT INTO sessions (id, token, gueltig_bis) VALUES (?1, ?2, ?3)",
+        rusqlite::params![info.id, token, gueltig_bis.to_rfc3339()],
+    ).map_err(|e| format!("Fehler beim Einfügen von Token in Sessions: {e}"))?;
+
+    Ok((info, token, gueltig_bis))
 }
 
 pub fn get_public_key(email: &str, fingerprint: &str) -> Result<String, String> {
@@ -374,7 +474,7 @@ pub fn delete_user(email: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Result<(), String> {
+pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>) -> Result<(), String> {
     
     match typ {
         "email" | "webhook" => { },
@@ -415,7 +515,7 @@ pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Res
 
     conn.execute(
         "INSERT INTO abonnements (typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![typ, text, amtsgericht, bezirk, b, aktenzeichen],
+        rusqlite::params![typ, text, amtsgericht, bezirk, b, aktenzeichen.map(|s| s.to_string())],
     ).map_err(|e| format!("Fehler beim Einfügen von {blatt} in Abonnements: {e}"))?;
 
     Ok(())
@@ -437,7 +537,7 @@ pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementI
                 row.get::<usize, String>(1)?,
                 row.get::<usize, String>(2)?,
                 row.get::<usize, i32>(3)?,
-                row.get::<usize, String>(4)?
+                row.get::<usize, Option<String>>(4)?
             ))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
@@ -451,7 +551,7 @@ pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementI
                 grundbuchbezirk: bezirk.clone(),
                 blatt: blatt,
                 text: benutzer.email.to_string(),
-                aktenzeichen: aktenzeichen.to_string(),
+                aktenzeichen: aktenzeichen.as_ref().map(|s| s.to_string()),
             });
         }
     }
@@ -509,7 +609,7 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
         .query_map(rusqlite::params![typ, amtsgericht, bezirk, b], |row| {
             Ok((
                 row.get::<usize, String>(0)?,
-                row.get::<usize, String>(1)?
+                row.get::<usize, Option<String>>(1)?
             ))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
@@ -523,7 +623,7 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
                 grundbuchbezirk: bezirk.clone(),
                 blatt: b.clone(),
                 text: email.to_string(),
-                aktenzeichen: aktenzeichen.to_string(),
+                aktenzeichen: aktenzeichen.as_ref().map(|s| s.to_string()),
             });
         }
     }
@@ -531,7 +631,7 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
     Ok(bz)
 }
 
-pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Result<(), String> {
+pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>) -> Result<(), String> {
     
     match typ {
         "email" | "webhook" => { },
@@ -570,10 +670,21 @@ pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: &str) -> Res
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    conn.execute(
-        "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND aktenzeichen = ?5 AND typ = ?6",
-        rusqlite::params![text, amtsgericht, bezirk, b, aktenzeichen, typ],
-    ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
+    match aktenzeichen.as_ref() {
+        Some(s) => {
+            conn.execute(
+                "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND aktenzeichen = ?5 AND typ = ?6",
+                rusqlite::params![text, amtsgericht, bezirk, b, aktenzeichen, typ],
+            ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;        
+        },
+        None => {
+            conn.execute(
+                "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND typ = ?5",
+                rusqlite::params![text, amtsgericht, bezirk, b, typ],
+            ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
+        
+        }
+    }
 
     Ok(())
 }

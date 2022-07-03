@@ -929,5 +929,5 @@ pub struct AbonnementInfo {
     pub grundbuchbezirk: String,
     pub blatt: i32,
     pub text: String,
-    pub aktenzeichen: String,
+    pub aktenzeichen: Option<String>,
 }
