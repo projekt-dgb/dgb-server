@@ -29,6 +29,15 @@ pub fn create_database() -> Result<(), rusqlite::Error> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions (
+                benutzer        INTEGER PRIMARY KEY AUTOINCREMENT,
+                token           VARCHAR(1024) UNIQUE NOT NULL,
+                gueltig_bis     VARCHAR(255) NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS bezirke (
             land            VARCHAR(255) NOT NULL,
             amtsgericht     VARCHAR(255) NOT NULL,

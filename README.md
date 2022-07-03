@@ -36,6 +36,9 @@ kubectl create -f ./k8s/deploy-nossl.yml
 kubectl create ns cert-manager
 kubectl apply -f ./k8s/cert-manager.crds.yaml
 kubectl apply -f ./k8s/cert-manager.yaml
+
+# Neues Deployment
+kubectl rollout restart deployment dgb-server
 ```
 
 Zum Installieren der LetsEncrypt-SSL-Zertifikate benötigt `cert-manager`

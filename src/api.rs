@@ -5,9 +5,11 @@ pub mod status {
     // Startseite
     #[get("/")]
     async fn status(req: HttpRequest) -> impl Responder {
+        let css = include_str!("../style.css");
+        let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(include_str!("../index.html"))
+        .body(include_str!("../index.html").replace("<!-- CSS -->", &css))
     }
 
     // Seite mit API-Dokumentation
@@ -15,8 +17,29 @@ pub mod status {
     async fn api(req: HttpRequest) -> impl Responder {
         use comrak::{markdown_to_html, ComrakOptions};
         let html = markdown_to_html(include_str!("../API.md"), &ComrakOptions::default());
-        let css = include_str!("../github-markdown-light.css");
-        let body = format!("<!DOCTYPE html><html><head><style>{css}</style></head><body>{html}</body></html>");
+        let css = concat!(
+            include_str!("../github-markdown-light.css"), 
+            include_str!("../style.css")
+        );
+        let body = format!("
+            <!DOCTYPE html>
+            <html>
+                <head><style>{css}</style></head>
+                <body>
+                <nav>
+                    <ul>
+                        <li>
+                            <a href='/'><span>Startseite</span></a>
+                            <a href='/konto'><span>Mein Konto</span></a>
+                        </li>
+                    </ul>
+                </nav>
+                <div class='readme'>
+                {html}
+                </div>
+                </body>
+            </html>
+        ");
         
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -25,19 +48,46 @@ pub mod status {
 }
 
 pub mod login {
-    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+
+    use actix_web::{get, post, web, HttpRequest, Responder, HttpResponse};
+    use serde_derive::{Serialize, Deserialize};
 
     // Login-Seite
     #[get("/login")]
     async fn login_get(req: HttpRequest) -> impl Responder {
+        let css = include_str!("../style.css");
+        let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body("")
+        .body(include_str!("../login.html").replace("<!-- CSS -->", &css))
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct LoginForm {
+        email: String,
+        passwort: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum LoginResponse {
+        Ok(LoginResponseOk),
+        Error(LoginResponseError),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct LoginResponseOk {
+        token: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct LoginResponseError {
+        code: usize,
+        text: String,
     }
 
     // Login-Seite
     #[post("/login")]
-    async fn login_post(req: HttpRequest) -> impl Responder {
+    async fn login_post(form: web::Form<LoginForm>, req: HttpRequest) -> impl Responder {
         HttpResponse::Ok()
     }
 }
