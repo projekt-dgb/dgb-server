@@ -1,0 +1,29 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory 
+    privateKeySecretRef:
+      name: letsencrypt
+    solvers:
+    - dns01:
+        cloudflare:
+          email: felix@wasmer.io
+          apiTokenSecretRef:
+            name: cloudflare-api-token
+            key: api-token---
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: crt
+spec:
+  secretName: tls-secret
+  issuerRef:
+    kind: Issuer
+    name: letsencrypt
+  commonName: grundbuch-test.eu
+  dnsNames:
+  - "grundbuch-test.eu"
