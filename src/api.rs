@@ -214,6 +214,11 @@ pub mod k8s {
         let root_email = std::env::var("ROOT_EMAIL").ok();
         let root_passwort = std::env::var("ROOT_PASSWORT").ok();
 
+        let k8s_podlist = match crate::k8s::k8s_list_pods().await {
+            Ok(o) => format!("OK: {o}"),
+            Err(o) => format!("ERROR: {o}"),
+        };
+
         let body = if crate::k8s::is_running_in_k8s().await {
             format!("k8s available:\r\n\r\npeers:\r\n{body}")    
         } else {
@@ -221,6 +226,8 @@ pub mod k8s {
         };
 
         let body = format!("
+k8s_podlist: {k8s_podlist}
+
 root_token:{root_token:?}
 root_gueltig_bis:{root_gueltig_bis:?}
 root_email:{root_email:?}
