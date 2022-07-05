@@ -296,6 +296,24 @@ pub fn get_konto_data(benutzer: &BenutzerInfo) -> Result<KontoData, String> {
 
 pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
     
+    let root_token = std::env::var("ROOT_TOKEN");
+    let root_email = std::env::var("ROOT_EMAIL");
+    let root_gueltig_bis = std::env::var("ROOT_GUELTIG_BIS").ok()
+        .and_then(|gueltig_bis| DateTime::parse_from_rfc3339(&gueltig_bis).ok());
+    let now = Utc::now();
+
+    match (root_token, root_email, root_gueltig_bis) {
+        (Ok(token), Ok(root_email), Some(r)) if r > now => {
+            return Ok(BenutzerInfo {
+                id: i32::MAX, 
+                name: "Administrator".to_string(), 
+                email: root_email.clone(), 
+                rechte: "admin".to_string(), 
+            })
+        },
+        _ => { }
+    }
+
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -360,6 +378,34 @@ pub fn create_login_user_token(email: &str, passwort: &str) -> Result<(BenutzerI
     
     use uuid::Uuid;
 
+    let root_email = std::env::var("ROOT_EMAIL");
+    let root_passwort = std::env::var("ROOT_PASSWORT");
+
+    let gueltig_bis = Utc::now();
+    let gueltig_bis = gueltig_bis.checked_add_signed(chrono::Duration::minutes(30)).unwrap_or(gueltig_bis);
+    let token = Uuid::new_v4();
+    let token = format!("{token}");
+
+    if let (Ok(email), Ok(root_passwort_hashed)) = (root_email, root_passwort) {
+
+        if !verify_password(root_passwort_hashed.as_bytes(), &passwort) {
+            return Err(format!("Ungültiges Passwort"));
+        }
+
+        std::env::set_var("ROOT_TOKEN", token.clone());
+        std::env::set_var("ROOT_GUELTIG_BIS", gueltig_bis.to_rfc3339());
+        std::env::remove_var("ROOT_PASSWORT");
+
+        sync_env_vars();
+
+        return Ok((BenutzerInfo {
+            id: i32::MAX, 
+            name: "Administrator".to_string(), 
+            email: email.clone(), 
+            rechte: "admin".to_string(), 
+        }, token.clone(), gueltig_bis.clone()));
+    }
+
     let conn = Connection::open(get_db_path())
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -416,17 +462,17 @@ pub fn create_login_user_token(email: &str, passwort: &str) -> Result<(BenutzerI
         return Ok((info, token.clone(), gueltig_bis.into()));
     }
 
-    let gueltig_bis = Utc::now();
-    let gueltig_bis = gueltig_bis.checked_add_signed(chrono::Duration::minutes(30)).unwrap_or(gueltig_bis);
-    let token = Uuid::new_v4();
-    let token = format!("{token}");
-
     conn.execute(
         "INSERT INTO sessions (id, token, gueltig_bis) VALUES (?1, ?2, ?3)",
         rusqlite::params![info.id, token, gueltig_bis.to_rfc3339()],
     ).map_err(|e| format!("Fehler beim Einfügen von Token in Sessions: {e}"))?;
 
     Ok((info, token, gueltig_bis))
+}
+
+// TODO!
+pub fn sync_env_vars() {
+
 }
 
 pub fn get_public_key(email: &str, fingerprint: &str) -> Result<String, String> {

@@ -1,7 +1,7 @@
 use actix_web::{HttpRequest, HttpResponse};
 use crate::models::BenutzerInfo;
 
-async fn get_benutzer_from_httpauth(req: &HttpRequest) -> Result<BenutzerInfo, HttpResponse> {
+async fn get_benutzer_from_httpauth(req: &HttpRequest) -> Result<(String, BenutzerInfo), HttpResponse> {
     use self::upload::{UploadChangesetResponse, UploadChangesetResponseError};
     get_benutzer_from_httpauth_inner(req).await
     .map_err(|e| {
@@ -19,16 +19,17 @@ async fn get_benutzer_from_httpauth(req: &HttpRequest) -> Result<BenutzerInfo, H
     })
 }
 
-async fn get_benutzer_from_httpauth_inner(req: &HttpRequest) -> Result<BenutzerInfo, String> {
+async fn get_benutzer_from_httpauth_inner(req: &HttpRequest) -> Result<(String, BenutzerInfo), String> {
     use actix_web_httpauth::extractors::bearer::BearerAuth;
     use actix_web::FromRequest;
 
     let bearer = BearerAuth::extract(req).await
     .map_err(|e| format!("{e}"))?;
 
-    let user = crate::db::get_user_from_token(bearer.token())?;
-
-    Ok(user)
+    let token = bearer.token();
+    let user = crate::db::get_user_from_token(token)?;
+    
+    Ok((token.to_string(), user))
 }
 
 /// API für `/status` Anfragen
@@ -151,7 +152,7 @@ pub mod konto {
     #[get("/konto")]
     async fn konto_get(req: HttpRequest) -> impl Responder {
 
-        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(_) => { 
                 return HttpResponse::Found()
@@ -172,7 +173,8 @@ pub mod konto {
         let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
         let html = include_str!("../web/konto.html")
         .replace("<!-- CSS -->", &format!("<style>{}</style>", include_str!("../web/style.css")))
-        .replace("data-konto-daten=\"{}\"", &format!("data-konto-daten=\'{}\'", konto_data_json));
+        .replace("data-konto-daten=\"{}\"", &format!("data-konto-daten=\'{}\'", konto_data_json))
+        .replace("data-token-id=\"\"", &format!("data-token-id=\"{}\"", token));
 
         HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -207,11 +209,24 @@ pub mod k8s {
             Err(e) => format!("{e}"),
         };
 
+        let root_token = std::env::var("ROOT_TOKEN").ok();
+        let root_gueltig_bis = std::env::var("ROOT_GUELTIG_BIS").ok();
+        let root_email = std::env::var("ROOT_EMAIL").ok();
+        let root_passwort = std::env::var("ROOT_PASSWORT").ok();
+
         let body = if crate::k8s::is_running_in_k8s().await {
             format!("k8s available:\r\n\r\npeers:\r\n{body}")    
         } else {
             format!("k8s not available")
         };
+
+        let body = format!("
+root_token:{root_token:?}
+root_gueltig_bis:{root_gueltig_bis:?}
+root_email:{root_email:?}
+root_passwort:{root_passwort:?}
+
+{body}");
 
         HttpResponse::Ok()
         .content_type("text/plain; charset=utf-8")
@@ -289,7 +304,7 @@ pub mod upload {
         use std::path::Path;
         
         let upload_changeset = &*upload_changeset;
-        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
@@ -655,7 +670,7 @@ pub mod download {
         req: HttpRequest,
     ) -> impl Responder {
         
-        let _benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (_token, _benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
@@ -717,7 +732,7 @@ pub mod download {
         req: HttpRequest,
     ) -> impl Responder {
         
-        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
@@ -872,7 +887,7 @@ pub mod suche {
     #[get("/suche/{suchbegriff}")]
     async fn suche(suchbegriff: web::Path<String>, req: HttpRequest) -> impl Responder {
         
-        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
@@ -999,7 +1014,7 @@ pub mod abo {
         req: HttpRequest,
     ) -> impl Responder {
         
-        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
@@ -1035,7 +1050,7 @@ pub mod abo {
         req: HttpRequest,
     ) -> impl Responder {
         
-        let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
