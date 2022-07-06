@@ -228,10 +228,16 @@ pub async fn process_action(action: &ArgAction) -> Result<(), String> {
             };
             
             let _ = init_logger()?;
-            let _ = init(config)?;
-            
-            startup_http_server(&ip).await
-            .map_err(|e| format!("{e}"))
+
+            let start_sync_mode = std::env::var("SYNC_MODE") == Ok("1".to_string());
+            if !start_sync_mode {
+                let _ = init(config)?;
+                startup_http_server(&ip).await
+                .map_err(|e| format!("{e}"))
+            } else {
+                startup_sync_server(&ip).await
+                .map_err(|e| format!("{e}"))
+            }
         },
         Indexiere => crate::index::index_all(),
         Suche { begriff } => {
@@ -286,6 +292,23 @@ fn init(config: SmtpConfig) -> Result<(), String> {
     let _ = crate::email::init_email_config(config);
     
     Ok(())
+}
+
+async fn startup_sync_server(ip: &str) -> std::io::Result<()> {    
+    HttpServer::new(|| {
+
+        let json_cfg = JsonConfig::default()
+            .limit(usize::MAX)
+            .content_type_required(false);
+
+        App::new()
+            .app_data(json_cfg)
+            .wrap(actix_web::middleware::Compress::default())
+            .service(crate::api::sync::sync)
+    })
+    .bind((ip, 8081))?
+    .run()
+    .await
 }
 
 // Server-Start, extra Funktion für Unit-Tests

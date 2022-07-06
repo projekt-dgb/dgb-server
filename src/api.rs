@@ -144,6 +144,7 @@ pub mod login {
     }
 }
 
+/// API für `/konto` Anfragen: Gibt HTML-Übersicht für Benutzer / Abo-Verwaltung
 pub mod konto {
     use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
     use serde_derive::{Serialize, Deserialize};
@@ -193,6 +194,50 @@ pub mod konto {
     #[post("/konto")]
     async fn konto_post(req: HttpRequest) -> impl Responder {
         HttpResponse::Ok()
+    }
+}
+
+/// Wenn der Server im "Synchronisierungsmodus" gestartet wird,
+/// öffnet er einen Port auf :8081 (welcher nicht über den LoadBalancer)
+/// öffentlich pingbar ist. Der "Synchronisierungs-Server" überwacht alle
+/// Dateien im PersistentVolume, und pingt alle anderen Server im Cluster
+/// an, wenn sich Dateien verändern.
+///
+/// Die angepingten Server wiederum kopieren sich den neuen Stand der Dateien 
+/// wieder in den Pod-lokalen Speicher. So findet eine "asynchrone" Synchronisierung 
+/// statt, bei der immer mindestens zwei Kopien des gesamten Dateibestands existieren.
+pub mod sync {
+
+    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+    use serde_derive::{Serialize, Deserialize};
+
+    #[derive(Debug, Clone, PartialEq, PartialOrd)]
+    pub struct SyncRequest {
+        pub dateien: Vec<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum SyncResponse {
+        Ok(SyncResponseOk),
+        Error(SyncResponseError),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct SyncResponseOk { }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct SyncResponseError {
+        code: usize,
+        text: String,
+    }
+
+    #[post("/sync")]
+    async fn sync(req: HttpRequest) -> impl Responder {
+        let response = SyncResponse::Ok(SyncResponseOk { });
+        let json = serde_json::to_string(&response).unwrap_or_default();
+        HttpResponse::Ok()
+        .content_type("application/json; charset=utf-8")
+        .body(json)
     }
 }
 
