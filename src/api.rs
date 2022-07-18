@@ -1,4 +1,5 @@
 use actix_web::{HttpRequest, HttpResponse};
+use std::collections::BTreeMap;
 use crate::models::BenutzerInfo;
 
 async fn get_benutzer_from_httpauth(req: &HttpRequest) -> Result<(String, BenutzerInfo), HttpResponse> {
@@ -32,9 +33,53 @@ async fn get_benutzer_from_httpauth_inner(req: &HttpRequest) -> Result<(String, 
     Ok((token.to_string(), user))
 }
 
-/// API für `/status` Anfragen
-pub mod status {
-    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+async fn write_to_root_db(change: commit::DbChangeOp) -> Result<(), String> {
+
+    use crate::api::commit::{CommitResponse, CommitResponseOk};
+
+    let k8s_peers = crate::k8s::k8s_get_peer_ips().await
+    .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
+    
+    let mut result = BTreeMap::new();
+
+    for peer in k8s_peers {
+
+        let client = reqwest::Client::new();
+        let res = client.post(&format!("http://{}:8081/db", peer.ip))
+            .body(serde_json::to_string(&change).unwrap_or_default())
+            .send()
+            .await
+            .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
+
+        let o = res.json::<CommitResponse>().await
+        .map_err(|e| format!("Konnte Änderung nicht an Peer {} senden: {e}", peer.ip))?;
+        
+        match o {
+            CommitResponse::StatusOk(CommitResponseOk { }) => { },
+            CommitResponse::StatusError(e) => {
+                result.insert(format!("{}", peer.ip), e);
+            }
+        }
+    }
+
+    crate::db::pull_db().await
+    .map_err(|e| format!("Fehler beim Synchronisieren der Datenbanken (pull): {}: {}", e.code, e.text))?;
+
+    if result.is_empty() {
+        Ok(())
+    } else {
+        let error = result
+            .iter()
+            .map(|(k, v)| format!("{k}: {}: {}", v.code, v.text))
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        Err(format!("{error}"))
+    }
+}
+
+/// HTML für `/` und `/api` Seite
+pub mod index {
+    use actix_web::{get, HttpRequest, Responder, HttpResponse};
     
     // Startseite
     #[get("/")]
@@ -81,11 +126,13 @@ pub mod status {
     }
 }
 
+/// Login-API
 pub mod login {
 
     use actix_web::{get, post, web, HttpRequest, Responder, HttpResponse};
     use serde_derive::{Serialize, Deserialize};
     use chrono::{DateTime, Utc};
+    use crate::MountPoint;
 
     // Login-Seite
     #[get("/login")]
@@ -101,46 +148,77 @@ pub mod login {
     struct LoginForm {
         email: String,
         passwort: String,
+        form: Option<String>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    enum LoginResponse {
+    pub enum LoginResponse {
         Ok(LoginResponseOk),
         Error(LoginResponseError),
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct LoginResponseOk {
-        token: String,
-        valid_until: DateTime<Utc>,
+    pub struct LoginResponseOk {
+        pub token: String,
+        pub valid_until: DateTime<Utc>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct LoginResponseError {
-        code: usize,
-        text: String,
+    pub struct LoginResponseError {
+        pub code: usize,
+        pub text: String,
     }
 
     // Login-Seite
     #[post("/login")]
-    async fn login_post(form: web::Form<LoginForm>, req: HttpRequest) -> impl Responder {
+    async fn login_post(form: web::Form<LoginForm>, req: HttpRequest) -> impl Responder {        
+        let response = login_json(&form.email, &form.passwort).await;
+        HttpResponse::Ok()
+        .content_type("application/json; charset=utf-8")
+        .body(serde_json::to_string_pretty(&response).unwrap_or_default())
+    }
+
+    pub async fn login_json(email: &str, passwort: &str) -> LoginResponse {
         
-        let response = match crate::db::create_login_user_token(&form.email, &form.passwort) {
+        use crate::api::commit::DbChangeOp;
+
+        match crate::db::check_password(MountPoint::Local, &email, &passwort) {
             Ok((_info, token, valid_until)) => LoginResponse::Ok(LoginResponseOk {
                 token,
                 valid_until, 
             }),
             Err(e) => {
-                LoginResponse::Error(LoginResponseError {
-                    code: 0,
-                    text: e.clone(),
-                })
-            }
-        };
 
-        HttpResponse::Ok()
-        .content_type("application/json; charset=utf-8")
-        .body(serde_json::to_string_pretty(&response).unwrap_or_default())
+                let (token, gueltig_bis) = crate::db::generate_token();
+                
+                match crate::api::write_to_root_db(DbChangeOp::BenutzerSessionNeu { 
+                    email: email.to_string(), 
+                    token: token.clone(), 
+                    gueltig_bis: gueltig_bis.clone(), 
+                }).await {
+                    Ok(_) => { },
+                    Err(e) => {
+                        return LoginResponse::Error(LoginResponseError {
+                            code: 500,
+                            text: e.clone(),
+                        });
+                    }
+                }
+
+                match crate::db::check_password(MountPoint::Local, &email, &passwort) {
+                    Ok((_info, token, valid_until)) => LoginResponse::Ok(LoginResponseOk {
+                        token,
+                        valid_until, 
+                    }),
+                    Err(e) => {
+                        LoginResponse::Error(LoginResponseError {
+                            code: 0,
+                            text: e.clone(),
+                        })
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -206,97 +284,392 @@ pub mod konto {
 /// Die angepingten Server wiederum kopieren sich den neuen Stand der Dateien 
 /// wieder in den Pod-lokalen Speicher. So findet eine "asynchrone" Synchronisierung 
 /// statt, bei der immer mindestens zwei Kopien des gesamten Dateibestands existieren.
-pub mod sync {
+pub mod commit {
 
-    use actix_web::{get, post, HttpRequest, Responder, HttpResponse};
+    use actix_web::{post, web, HttpRequest, Responder, HttpResponse};
     use serde_derive::{Serialize, Deserialize};
+    use super::{
+        pull::PullResponse,
+        upload::{UploadChangeset, sync_changes_to_disk, commit_changes, verify_signature}
+    };
+    use std::path::Path;
+    use chrono::{DateTime, Utc};
+    use crate::models::{get_data_dir, MountPoint};
+    use crate::{
+        AppState,
+        BenutzerNeuArgsJson, BenutzerLoeschenArgs, 
+        BezirkNeuArgs, BezirkLoeschenArgs, 
+        AboNeuArgs, AboLoeschenArgs
+    };
 
-    #[derive(Debug, Clone, PartialEq, PartialOrd)]
-    pub struct SyncRequest {
-        pub dateien: Vec<String>,
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub enum CommitResponse {
+        #[serde(rename = "ok")]
+        StatusOk(CommitResponseOk),
+        #[serde(rename = "error")]
+        StatusError(CommitResponseError),
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    enum SyncResponse {
-        Ok(SyncResponseOk),
-        Error(SyncResponseError),
+    pub struct CommitResponseOk { }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct CommitResponseError {
+        pub code: usize,
+        pub text: String,
+    }
+
+    #[post("/commit")]
+    async fn commit(
+        upload_changeset: web::Json<UploadChangeset>,
+        app_state: web::Data<AppState>,
+        req: HttpRequest
+    ) -> impl Responder {
+        match commit_internal(&upload_changeset, &app_state, &req).await {
+            Ok(o) => o,
+            Err(e) => e,
+        }
+    }
+
+    async fn commit_internal(
+        upload_changeset: &UploadChangeset,
+        app_state: &AppState,
+        req: &HttpRequest
+    ) -> Result<HttpResponse, HttpResponse> {
+        
+        let upload_changeset = &*upload_changeset;
+        let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
+        
+        let response_err = |code: usize, text: String| {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string_pretty(&CommitResponse::StatusError(
+                CommitResponseError {
+                    code: code,
+                    text: text,
+                },
+            ))
+            .unwrap_or_default())
+        };
+
+        let response_ok = || { 
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&CommitResponse::StatusOk(CommitResponseOk { 
+            })).unwrap_or_default())
+        };
+        
+        verify_signature(&benutzer.email, &upload_changeset)
+        .map_err(|e| response_err(501, format!("Fehler bei Überprüfung der digitalen Signatur:\r\n{e}")))?;
+        
+        if app_state.k8s_aktiv() {
+        
+            let remote_path = Path::new(&get_data_dir(MountPoint::Remote)).to_path_buf();
+            sync_changes_to_disk(&upload_changeset, &remote_path)?;
+            commit_changes(&app_state, &remote_path, &benutzer, &upload_changeset).await
+            .map_err(|e| response_err(501, format!("Konnte Änderung nicht speichern:\r\n{e}")))?;
+            
+            let k8s_peers = crate::k8s::k8s_get_peer_ips().await
+            .map_err(|_| response_err(500, "Kubernetes aktiv, konnte aber Pods nicht lesen (keine ClusterRole-Berechtigung?)".to_string()))?;
+            
+            for peer in k8s_peers.iter() {
+                
+                let client = reqwest::Client::new();
+                let res = client.post(&format!("http://{}:8081/pull", peer.ip))
+                    .body("")
+                    .send()
+                    .await;
+                
+                let json = match res {
+                    Ok(o) => o.json::<PullResponse>().await,
+                    Err(e) => {
+                        log::error!("Pod {}:{} konnte nicht synchronisiert werden: {e}", peer.namespace, peer.name);
+                        continue;
+                    },
+                };
+
+                match json {
+                    Ok(PullResponse::StatusOk(_)) => { },
+                    Ok(PullResponse::StatusError(e)) => {
+                        log::error!("Pod {}:{} konnte nicht synchronisiert werden: {}: {}", peer.namespace, peer.name, e.code, e.text);
+                        continue;
+                    },
+                    Err(e) => {
+                        log::error!("Pod {}:{} konnte nicht synchronisiert werden: {e}", peer.namespace, peer.name);
+                        continue;
+                    },
+                }
+            }
+        } else {
+            let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
+            sync_changes_to_disk(&upload_changeset, &local_path)?;
+            let _ = commit_changes(&app_state, &local_path, &benutzer, &upload_changeset).await;
+        }
+            
+        Ok(response_ok())
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct SyncResponseOk { }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct SyncResponseError {
-        code: usize,
-        text: String,
+    pub(crate) enum DbChangeOp {
+        BenutzerNeu(BenutzerNeuArgsJson),
+        BenutzerLoeschen(BenutzerLoeschenArgs),
+        BezirkNeu(BezirkNeuArgs),
+        BezirkLoeschen(BezirkLoeschenArgs),
+        AboNeu(AboNeuArgs),
+        AboLoeschen(AboLoeschenArgs),
+        BenutzerSessionNeu { 
+            email: String, 
+            token: String, 
+            gueltig_bis: DateTime<Utc> 
+        },
     }
 
-    #[post("/sync")]
-    async fn sync(req: HttpRequest) -> impl Responder {
-        let response = SyncResponse::Ok(SyncResponseOk { });
-        let json = serde_json::to_string(&response).unwrap_or_default();
-        HttpResponse::Ok()
-        .content_type("application/json; charset=utf-8")
-        .body(json)
+    #[post("/db")]
+    async fn db(
+        upload_changeset: web::Json<DbChangeOp>,
+        app_state: web::Data<AppState>,
+        req: HttpRequest
+    ) -> impl Responder {
+        match db_change_internal(&upload_changeset, &app_state, &req).await {
+            Ok(o) => o,
+            Err(e) => e,
+        }
+    }
+
+    async fn db_change_internal(
+        change_op: &DbChangeOp,
+        app_state: &AppState,
+        req: &HttpRequest
+    ) -> Result<HttpResponse, HttpResponse> {
+        
+        let response_err = |code: usize, text: String| {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string_pretty(&CommitResponse::StatusError(
+                CommitResponseError {
+                    code: code,
+                    text: text,
+                },
+            ))
+            .unwrap_or_default())
+        };
+
+        let response_ok = || { 
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&CommitResponse::StatusOk(CommitResponseOk { 
+            })).unwrap_or_default())
+        };
+
+        let mount_point_write = if app_state.k8s_aktiv() { MountPoint::Remote } else { MountPoint::Local };
+
+        match change_op {
+            DbChangeOp::BenutzerNeu(un) => {
+                match crate::db::create_user(
+                    mount_point_write, 
+                    &un.name, 
+                    &un.email, 
+                    &un.passwort, 
+                    &un.rechte,
+                    un.schluessel.clone(),
+                ) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            },
+            DbChangeOp::BenutzerLoeschen(ul) => {
+                match crate::db::delete_user(mount_point_write, &ul.email) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            }
+            DbChangeOp::BezirkNeu(bn) => {
+                match crate::db::create_gemarkung(mount_point_write, &bn.land, &bn.amtsgericht, &bn.bezirk) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            }
+            DbChangeOp::BezirkLoeschen(bl) => {
+                match crate::db::delete_gemarkung(mount_point_write, &bl.land, &bl.amtsgericht, &bl.bezirk) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            }
+            DbChangeOp::AboNeu(an) => {
+                match crate::db::create_abo(mount_point_write, &an.typ, &an.blatt, &an.text, an.aktenzeichen.as_ref().map(|s| s.as_str())) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            }
+            DbChangeOp::AboLoeschen(al) => {
+                match crate::db::delete_abo(mount_point_write, &al.typ, &al.blatt, &al.text, al.aktenzeichen.as_ref().map(|s| s.as_str())) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            },
+            DbChangeOp::BenutzerSessionNeu { email, token, gueltig_bis } => {
+                match crate::db::insert_token_into_sessions(mount_point_write, email, token, gueltig_bis) {
+                    Ok(()) => Ok(response_ok()),
+                    Err(s) => Err(response_err(500, s)),
+                }
+            }
+        }
     }
 }
 
-/// API für `/k8s` Anfragen: Gibt eine Status-Übersicht des k8s-clusters aus
-pub mod k8s {
-    use actix_web::{get, HttpRequest, Responder, HttpResponse};
+/// Um die Server zu synchronisieren, läuft intern ein zweiter Server auf Port 8081,
+/// der nur im K8s-Cluster intern anpingbar ist. Wenn der Server über /pull oder /pull-db
+/// angepingt wird, wird die Pod-lokale Datenbank mit dem PersistentVolume synchronisiert
+/// (meist nach Insert / Delete Abfragen).
+/// 
+/// Insgesamt verhindert dieses Vorgehen, dass es zu Verzögerungen / Ausfällen bei Arbeiten
+/// am PersistentVolume kommt.
+pub mod pull {
+
+    use crate::models::{get_data_dir, MountPoint, get_db_path};
+    use actix_web::{post, web, HttpRequest, Responder, HttpResponse};
+    use serde_derive::{Serialize, Deserialize};
+    use crate::AppState;
+    use std::path::Path;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub enum PullResponse {
+        #[serde(rename = "ok")]
+        StatusOk(PullResponseOk),
+        #[serde(rename = "error")]
+        StatusError(PullResponseError),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct PullResponseOk { }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct PullResponseError {
+        pub code: usize,
+        pub text: String,
+    }
+
+    #[post("/pull")]
+    async fn pull(req: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
+        match pull_internal(&app_state) {
+            Ok(o) => o,
+            Err(e) => e,
+        }
+    }
+
+    fn pull_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
+
+        use git2::Repository;
+
+        let response_ok = || {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&PullResponse::StatusOk(PullResponseOk { })).unwrap_or_default())
+        };
+
+        let response_err = |code: usize, text: String| {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&PullResponse::StatusError(PullResponseError {
+                code,
+                text,
+            })).unwrap_or_default())
+        };
+
+        if !app_state.k8s_aktiv() || app_state.sync_server() {
+            return Ok(response_ok());
+        }
+
+        let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
+        if !local_path.exists() {
+            let _ = std::fs::create_dir(local_path.clone());
+        }
     
-    // Test, um k8s-status abzufragen
-    #[get("/k8s")]
-    async fn k8s(req: HttpRequest) -> impl Responder {
-
-        let body = match crate::k8s::k8s_get_peer_ips().await {
-            Ok(peers) => peers.join("\r\n"),
-            Err(e) => format!("{e}"),
+        let repo = match Repository::open(&local_path) {
+            Ok(o) => o,
+            Err(_) => { 
+                Repository::init(&local_path)
+                .map_err(|e| response_err(501, format!("{e}")))? 
+            },
         };
 
-        let root_token = std::env::var("ROOT_TOKEN").ok();
-        let root_gueltig_bis = std::env::var("ROOT_GUELTIG_BIS").ok();
-        let root_email = std::env::var("ROOT_EMAIL").ok();
-        let root_passwort = std::env::var("ROOT_PASSWORT").ok();
+        let mut remote = match repo.find_remote("origin") {
+            Ok(o) => o,
+            Err(e) => {
+                repo.remote_add_fetch("origin", &get_data_dir(MountPoint::Remote))
+                .map_err(|e| response_err(501, format!("{e}")))?;
+                repo.find_remote("origin")
+                .map_err(|e| response_err(501, format!("{e}")))?
+            }
+        };
+        
+        remote.fetch(&["main"], None, None)
+        .map_err(|e| response_err(501, format!("{e}")))?;
+        
+        Ok(response_ok())
+    }
 
-        let k8s_podlist = match crate::k8s::k8s_list_pods().await {
-            Ok(o) => format!("OK: {o}"),
-            Err(o) => format!("ERROR: {o}"),
+    #[post("/pull-db")]
+    async fn pull_db(req: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
+        match pull_db_internal(&app_state) {
+            Ok(o) => o,
+            Err(e) => e,
+        }
+    }
+
+    fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
+
+        let response_ok = || {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&PullResponse::StatusOk(PullResponseOk { 
+            })).unwrap_or_default())
         };
 
-        let body = if crate::k8s::is_running_in_k8s().await {
-            format!("k8s available:\r\n\r\npeers:\r\n{body}")    
-        } else {
-            format!("k8s not available")
+        let response_err = |code: usize, text: String| {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&PullResponse::StatusError(PullResponseError {
+                code,
+                text,
+            })).unwrap_or_default())
         };
 
-        let body = format!("
-k8s_podlist: {k8s_podlist}
+        if !app_state.k8s_aktiv() || app_state.sync_server() {
+            return Ok(response_ok());
+        }
 
-root_token:{root_token:?}
-root_gueltig_bis:{root_gueltig_bis:?}
-root_email:{root_email:?}
-root_passwort:{root_passwort:?}
+        let remote_path = Path::new(&get_db_path(MountPoint::Remote)).to_path_buf();
+        if !remote_path.exists() {
+            return Err(response_err(404, "Remote: Benutzerdatenbank existiert nicht".to_string()));
+        }
 
-{body}");
+        let local_path = Path::new(&get_db_path(MountPoint::Local)).to_path_buf();
+        if let Some(parent) = local_path.parent() {
+            let _ = std::fs::create_dir(parent);
+        }
 
-        HttpResponse::Ok()
-        .content_type("text/plain; charset=utf-8")
-        .body(body)
+        let _ = std::fs::copy(&remote_path, &local_path)
+        .map_err(|e| response_err(500, format!("Remote: Fehler beim Kopieren der Benutzerdatenbank vom PV zum Pod: {e}")));
+
+        Ok(response_ok())
     }
 }
 
 /// API für `/upload` Anfragen
 pub mod upload {
 
-    use crate::models::{PdfFile, BenutzerInfo, get_data_dir};
-    use crate::db::GemarkungsBezirke;
-    use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
+    use crate::{
+        AppState,
+        models::{PdfFile, BenutzerInfo, MountPoint, get_data_dir},
+        db::GemarkungsBezirke,
+    };
+    use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
-    use std::collections::{BTreeMap, BTreeSet};
-    use url_encoded_data::UrlEncodedData;
-    use std::path::PathBuf;
-    
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+    use super::commit::CommitResponse;
+
     pub type FileName = String;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -336,53 +709,151 @@ pub mod upload {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct UploadChangesetResponseOk {
-        pub neu: Vec<PdfFile>,
-        pub geaendert: Vec<PdfFile>,
-    }
+    pub struct UploadChangesetResponseOk { }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct UploadChangesetResponseError {
-        pub code: isize,
+        pub code: usize,
         pub text: String,
     }
 
     #[post("/upload")]
     async fn upload(
         upload_changeset: web::Json<UploadChangeset>,
+        app_state: web::Data<AppState>,
         req: HttpRequest,
     ) -> impl Responder {
-        
-        use std::path::Path;
+        match upload_internal(&upload_changeset, &app_state, &req).await {
+            Ok(o) => o,
+            Err(e) => e,
+        }
+    }
+    
+    async fn upload_internal(
+        upload_changeset: &UploadChangeset,
+        app_state: &AppState,
+        req: &HttpRequest
+    ) -> Result<HttpResponse, HttpResponse> {
         
         let upload_changeset = &*upload_changeset;
-        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
-            Ok(o) => o,
-            Err(e) => { return e; },
+        let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
+        
+        let response_err = |code: usize, text: String| {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                UploadChangesetResponseError {
+                    code: code,
+                    text: text,
+                },
+            ))
+            .unwrap_or_default())
         };
-        
-        if let Err(e) = verify_signature(&benutzer.email, &upload_changeset) {
-            return HttpResponse::Ok().content_type("application/json").body(
-                serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                    UploadChangesetResponseError {
-                        code: 500,
-                        text: format!("Fehler bei Überprüfung der digitalen Signatur:\r\n{e}"),
-                    },
-                ))
-                .unwrap_or_default(),
-            );
-        }
-        
-        let folder_path = get_data_dir();
-        let folder_path = Path::new(&folder_path);
-        if !folder_path.exists() {
-            let _ = std::fs::create_dir(folder_path.clone());
-        }
 
-        let mut check = UploadChangesetResponseOk {
-            neu: Vec::new(),
-            geaendert: Vec::new(),
+        let response_ok = || {
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(serde_json::to_string(&UploadChangesetResponse::StatusOk(UploadChangesetResponseOk { 
+            })).unwrap_or_default())
         };
+
+        verify_signature(&benutzer.email, &upload_changeset)
+        .map_err(|e| response_err(501, format!("Fehler bei Überprüfung der digitalen Signatur:\r\n{e}")))?;
+
+        if app_state.k8s_aktiv() {
+            
+            let k8s_peers = crate::k8s::k8s_get_peer_ips().await
+            .map_err(|e| response_err(500, "Kubernetes aktiv, konnte Pods aber nicht lesen (keine ClusterRole-Berechtigung?)".to_string()))?;
+            
+            for peer in k8s_peers.iter() {
+                
+                let client = reqwest::Client::new();
+                let res = client.post(&format!("http://{}:8081/commit", peer.ip))
+                    .body(serde_json::to_string(&upload_changeset).unwrap_or_default())
+                    .bearer_auth(token.clone())
+                    .send()
+                    .await;
+                
+                let json = match res {
+                    Ok(o) => o,
+                    Err(e) => { continue; }
+                };
+
+                if let Some(cr) = json.json::<CommitResponse>().await.ok() {
+                    match cr {
+                        CommitResponse::StatusOk(_) => return Ok(response_ok()),
+                        CommitResponse::StatusError(e) => {
+                            return Err(response_err(e.code, e.text));
+                        }
+                    }
+                }
+            }
+
+            return Err(response_err(500, "Konnte Änderung nicht speichern: kein Synchronisationsserver aktiv.".to_string()));
+        } else {
+            let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
+            sync_changes_to_disk(&upload_changeset, &local_path)?;
+            commit_changes(&app_state, &local_path, &benutzer, &upload_changeset).await
+            .map_err(|e| response_err(500, format!("Konnte Änderung nicht speichern: {e}")))?;
+            Ok(response_ok())
+        }
+    }
+
+    pub fn verify_signature(email: &str, changeset: &UploadChangeset) -> Result<bool, String> {
+
+        use sequoia_openpgp::policy::StandardPolicy as P;
+
+        let json = serde_json::to_string_pretty(&changeset.data)
+            .map_err(|e| format!("Konnte .data nicht zu JSON konvertieren: {e}"))?
+            .lines()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\r\n");
+            
+        let hash = &changeset.signatur.hash;
+        let signatur = changeset.signatur.pgp_signatur.clone().join("\r\n");
+        let msg = format!("-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: {hash}\r\n\r\n{json}\r\n-----BEGIN PGP SIGNATURE-----\r\n{signatur}\r\n-----END PGP SIGNATURE-----");
+        
+        let p = &P::new();
+        let cert = crate::db::get_key_for_fingerprint(&changeset.fingerprint, email)?;
+        let mut plaintext = Vec::new();
+        let _ = crate::pgp::verify(p, &mut plaintext, msg.as_bytes(), &cert)
+            .map_err(|e| format!("{e}"))?;
+        
+        Ok(true)
+    }
+    
+    fn commit_header_with_signature(
+        commit_titel: &str,
+        commit_beschreibung: &[String],
+        fingerprint: &str,
+        signatur: &PgpSignatur,
+    ) -> String {
+        let mut no_sig = String::new();
+
+        no_sig.push_str(commit_titel);
+        no_sig.push_str("\r\n\r\n");
+        
+        if !commit_beschreibung.is_empty() {
+            no_sig.push_str(&commit_beschreibung.to_vec().join("\r\n"));
+            no_sig.push_str("\r\n");        
+        }
+        
+        no_sig.push_str(&format!("Hash:         {}\r\n", signatur.hash));
+        no_sig.push_str(&format!("Schlüssel-ID: {fingerprint}\r\n"));
+        no_sig.push_str("\r\n");
+
+        no_sig.push_str("-----BEGIN PGP SIGNATURE-----\r\n");
+        no_sig.push_str(&signatur.pgp_signatur.to_vec().join("\r\n"));
+        no_sig.push_str("\r\n-----END PGP SIGNATURE-----\r\n");
+
+        no_sig
+    }
+    
+    pub fn sync_changes_to_disk(
+        upload_changeset: &UploadChangeset,
+        folder_path: &PathBuf,
+    ) -> Result<(), HttpResponse> {
 
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
         
@@ -390,27 +861,7 @@ pub mod upload {
         
             let amtsgericht = &neu.analysiert.titelblatt.amtsgericht;
             let grundbuch = &neu.analysiert.titelblatt.grundbuch_von;
-            let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
-                if ag == amtsgericht && bezirk == grundbuch { Some(land.clone()) } else { None }
-            });
-            
-            let land = match land {
-                None => {
-                    return HttpResponse::Ok().content_type("application/json").body(
-                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                            UploadChangesetResponseError {
-                                code: 1,
-                                text: format!(
-                                    "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
-                                    amtsgericht, grundbuch
-                                ),
-                            },
-                        ))
-                        .unwrap_or_default(),
-                    );
-                },
-                Some(s) => s,
-            };
+            let land = get_land(&gemarkungen, &amtsgericht, &grundbuch)?;
             
             let blatt = neu.analysiert.titelblatt.blatt;
             let target_path = folder_path
@@ -428,36 +879,13 @@ pub mod upload {
 
             let _ = std::fs::create_dir_all(&target_folder);
             let _ = std::fs::write(target_path, target_json.as_bytes());
-
-            check.neu.push(neu.clone());
         }
 
         for geaendert in upload_changeset.data.geaendert.iter() {
             
             let amtsgericht = &geaendert.neu.analysiert.titelblatt.amtsgericht;
             let grundbuch = &geaendert.neu.analysiert.titelblatt.grundbuch_von;
-
-            let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
-                if ag == amtsgericht && bezirk == grundbuch { Some(land.clone()) } else { None }
-            });
-            
-            let land = match land {
-                None => {
-                    return HttpResponse::Ok().content_type("application/json").body(
-                        serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                            UploadChangesetResponseError {
-                                code: 1,
-                                text: format!(
-                                    "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
-                                    amtsgericht, grundbuch
-                                ),
-                            },
-                        ))
-                        .unwrap_or_default(),
-                    );
-                },
-                Some(s) => s,
-            };
+            let land = get_land(&gemarkungen, &amtsgericht, &grundbuch)?;
 
             let blatt = geaendert.neu.analysiert.titelblatt.blatt;
             let target_path = folder_path
@@ -475,103 +903,55 @@ pub mod upload {
 
             let _ = std::fs::create_dir_all(&target_folder);
             let _ = std::fs::write(target_path, target_json.as_bytes());
-
-            check.geaendert.push(geaendert.neu.clone());
-        }
-        
-        let server_url = "https://127.0.0.1"; // TODO
-        
-        if !check.geaendert.is_empty() || !check.neu.is_empty() {
-            if let Err(e) = commit_changes(&gemarkungen, &server_url, &folder_path.to_path_buf(), &benutzer, &upload_changeset).await {
-                return HttpResponse::Ok()
-                .content_type("application/json")
-                .body(
-                    serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
-                        UploadChangesetResponseError {
-                            code: 501,
-                            text: format!("Konnte Änderungstext nicht speichern: {e}"),
-                        },
-                    ))
-                    .unwrap_or_default(),
-                );
-            }
         }
 
-        HttpResponse::Ok()
-        .content_type("application/json")
-        .body(
-            serde_json::to_string_pretty(&UploadChangesetResponse::StatusOk(check))
-                .unwrap_or_default(),
-        )
+        Ok(())
     }
-    
-    fn verify_signature(email: &str, changeset: &UploadChangeset) -> Result<bool, String> {
 
-        use sequoia_openpgp::policy::StandardPolicy as P;
+    fn get_land(
+        gemarkungen: &GemarkungsBezirke, 
+        amtsgericht: &str, 
+        grundbuch: &str
+    ) -> Result<String, HttpResponse> {
 
-        let json = serde_json::to_string_pretty(&changeset.data)
-            .map_err(|e| format!("Konnte .data nicht zu JSON konvertieren: {e}"))?
-            .lines()
-            .map(|l| l.to_string())
-            .collect::<Vec<_>>()
-            .join("\r\n");
-            
-        let hash = &changeset.signatur.hash;
-        let signatur = changeset.signatur.pgp_signatur.clone().join("\r\n");
-        let msg = format!("-----BEGIN PGP SIGNED MESSAGE-----\r\nHash: {hash}\r\n\r\n{json}\r\n-----BEGIN PGP SIGNATURE-----\r\n{signatur}\r\n-----END PGP SIGNATURE-----");
-
-        println!("msg received:\r\n{msg}");
+        let land = gemarkungen.iter().find_map(|(land, ag, bezirk)| {
+            if ag != amtsgericht { return None; }
+            if bezirk != grundbuch { return None; }
+            Some(land.clone())
+        });
         
-        let p = &P::new();
-        let cert = crate::db::get_key_for_fingerprint(&changeset.fingerprint, email)?;
-        let mut plaintext = Vec::new();
-        let _ = crate::pgp::verify(p, &mut plaintext, msg.as_bytes(), &cert)
-            .map_err(|e| format!("{e}"))?;
-        
-        Ok(true)
+        let error = || {
+            serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                UploadChangesetResponseError {
+                    code: 1,
+                    text: format!(
+                        "Ungültiges Amtsgericht oder ungültige Gemarkung: {}/{}",
+                        amtsgericht, grundbuch
+                    ),
+                },
+            ))
+            .unwrap_or_default()
+        };
+
+        let land = land.ok_or(
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(error())
+        )?;
+
+        Ok(land)
     }
-    
-    fn commit_header_no_signature(
-        commit_titel: &str,
-        commit_beschreibung: &[String],
-        fingerprint: &str,
-    ) -> String {
-        let mut target = String::new();
-        target.push_str(commit_titel);
-        target.push_str("\r\n\r\n");
-        if !commit_beschreibung.is_empty() {
-            target.push_str(&commit_beschreibung.to_vec().join("\r\n"));
-            target.push_str("\r\n");        
-        }
-        target
-    }
-    
-    fn commit_header_with_signature(
-        commit_titel: &str,
-        commit_beschreibung: &[String],
-        fingerprint: &str,
-        signatur: &PgpSignatur,
-    ) -> String {
-        let mut no_sig = commit_header_no_signature(commit_titel, commit_beschreibung, fingerprint);
-        no_sig.push_str("\r\n");
-        no_sig.push_str(&format!("Hash:         {}\r\n", signatur.hash));
-        no_sig.push_str(&format!("Schlüssel-ID: {fingerprint}\r\n"));
-        no_sig.push_str("\r\n");
-        no_sig.push_str("-----BEGIN PGP SIGNATURE-----\r\n");
-        no_sig.push_str(&signatur.pgp_signatur.to_vec().join("\r\n"));
-        no_sig.push_str("\r\n-----END PGP SIGNATURE-----\r\n");
-        no_sig
-    }
-    
-    async fn commit_changes(
-        gemarkungen: &GemarkungsBezirke,
-        server_url: &str, 
+
+    pub async fn commit_changes(
+        app_state: &AppState, 
         folder_path: &PathBuf, 
         benutzer: &BenutzerInfo, 
         upload_changeset: &UploadChangeset
     ) -> Result<(), String> {
     
         use git2::Repository;
+
+        let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
 
         let repo = match Repository::open(&folder_path) {
             Ok(o) => o,
@@ -675,14 +1055,19 @@ pub mod upload {
                 .map_err(|e| format!("{e}"))?;
             
             for abo_info in webhook_abos {
-                let _ = crate::email::send_change_webhook(server_url, &abo_info, &commit_id).await;
+                let _ = crate::email::send_change_webhook(&app_state.host_name(), &abo_info, &commit_id).await;
             }
             
             let email_abos = crate::db::get_email_abos(&blatt)
                 .map_err(|e| format!("{e}"))?;
             
             for abo_info in email_abos {
-                let _ = crate::email::send_change_email(server_url, &abo_info, &commit_id);
+                let _ = crate::email::send_change_email(
+                    &app_state.smtp_config(), 
+                    &app_state.host_name(), 
+                    &abo_info, 
+                    &commit_id
+                );
             }
         }
                 
@@ -693,10 +1078,9 @@ pub mod upload {
 /// API für `/download` Anfragen
 pub mod download {
 
-    use crate::models::{PdfFile, get_data_dir};
+    use crate::models::{PdfFile, get_data_dir, MountPoint};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
-    use url_encoded_data::UrlEncodedData;
     use std::path::Path;
     use crate::pdf::PdfGrundbuchOptions;
     use crate::models::Grundbuch;
@@ -752,7 +1136,7 @@ pub mod download {
             }
         };
 
-        let folder_path = get_data_dir();
+        let folder_path = get_data_dir(MountPoint::Local);
         let folder_path = Path::new(&folder_path);
         
         let file_path = folder_path
@@ -814,7 +1198,7 @@ pub mod download {
             }
         };
 
-        let folder_path = get_data_dir();
+        let folder_path = get_data_dir(MountPoint::Local);
         let folder_path = Path::new(&folder_path);
         
         let file_path = folder_path
@@ -860,7 +1244,6 @@ pub mod download {
 
         use printpdf::Mm;
         use crate::pdf::PdfFonts;
-        use crate::models::Grundbuch;
         use printpdf::PdfDocument;
         
         let grundbuch_von = gb.titelblatt.grundbuch_von.clone();
@@ -888,12 +1271,10 @@ pub mod download {
 /// API für `/suche` Anfragen
 pub mod suche {
 
-    use crate::models::{AbonnementInfo, PdfFile, Titelblatt, get_data_dir};
+    use crate::models::{AbonnementInfo, Titelblatt, get_data_dir, MountPoint};
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use regex::Regex;
     use serde_derive::{Deserialize, Serialize};
-    use std::path::{Path, PathBuf};
-    use url_encoded_data::UrlEncodedData;
     use crate::suche::{SuchErgebnisAenderung, SuchErgebnisGrundbuch};
     
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -943,7 +1324,7 @@ pub mod suche {
             Ok(o) => o,
             Err(e) => { return e; },
         };
-        let folder_path = get_data_dir();
+        let folder_path = get_data_dir(MountPoint::Local);
         let suchbegriff = &*suchbegriff;
         
         let ergebnisse = match crate::suche::suche_in_index(&suchbegriff) {
@@ -1003,40 +1384,16 @@ pub mod suche {
             .content_type("application/json")
             .body(json)
     }
-
-    fn normalize_search(text: &str) -> Option<String> {
-        if RE_2.is_match(text) {
-            let grundbuch_von = RE_2
-                .captures_iter(text)
-                .nth(0)
-                .and_then(|cap| Some(cap.get(1)?.as_str().to_string()))?;
-            let blatt = RE_2
-                .captures_iter(text)
-                .nth(0)
-                .and_then(|cap| Some(cap.get(2)?.as_str().parse::<usize>().ok()?))?;
-            Some(format!("{grundbuch_von}_{blatt}"))
-        } else if RE.is_match(text) {
-            let grundbuch_von = RE
-                .captures_iter(text)
-                .nth(0)
-                .and_then(|cap| Some(cap.get(1)?.as_str().to_string()))?;
-            let blatt = RE
-                .captures_iter(text)
-                .nth(0)
-                .and_then(|cap| Some(cap.get(2)?.as_str().parse::<usize>().ok()?))?;
-            Some(format!("{grundbuch_von}_{blatt}"))
-        } else {
-            None
-        }
-    }
 }
 
 /// API für `/abo` Anfragen
 pub mod abo {
 
+    use crate::{AppState, AboNeuArgs, AboLoeschenArgs, models::MountPoint};
+    use super::commit::DbChangeOp;
     use actix_web::{get, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
-    
+
     #[derive(Debug, Clone, Serialize, Deserialize)]
     enum AboNeuAnfrage {
         #[serde(rename = "ok")]
@@ -1061,75 +1418,108 @@ pub mod abo {
 
     #[get("/abo-neu/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}")]
     async fn abo_neu(
+        app_state: web::Data<AppState>,
         path: web::Path<(String, String, String, usize)>, 
         form: web::Json<AboNeuForm>, 
         req: HttpRequest,
     ) -> impl Responder {
         
-        let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
+        let response_err = |code: usize, text: String| {
+
+            let json = serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+                code: code,
+                text: text,
+            })).unwrap_or_default();
+
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(json)
+        };
+
+        let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
         let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt) = &*path;
-        let abo = crate::db::create_abo(
-            &email_oder_webhook, 
-            &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), 
-            &benutzer.email, 
-            form.tag.as_ref().map(|s| s.as_str())
-        );
 
-        let json = match abo {
-            Ok(()) => {
-                serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { })).unwrap_or_default()
-            },
-            Err(e) => {
-                serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
-                    code: 500,
-                    text: format!("{e}"),
-                })).unwrap_or_default()
-            }
+        let abo_return = if app_state.k8s_aktiv() {
+            super::write_to_root_db(DbChangeOp::AboNeu(AboNeuArgs {
+                typ: email_oder_webhook.clone(),
+                blatt: format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"),
+                text: benutzer.email.clone(),
+                aktenzeichen: form.tag.clone(),
+            })).await
+        } else {
+            crate::db::create_abo(
+                MountPoint::Local,
+                &email_oder_webhook, 
+                &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), 
+                &benutzer.email, 
+                form.tag.as_ref().map(|s| s.as_str())
+            )
         };
 
-        HttpResponse::Ok()
-            .content_type("application/json")
-            .body(json)
+        match abo_return {
+            Ok(()) => {
+                HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { 
+                })).unwrap_or_default())
+            },
+            Err(e) => response_err(500, format!("Fehler beim Erstellen des Abonnements: {e}"))
+        }
     }
     
     #[get("/abo-loeschen/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}")]
     async fn abo_loeschen(
+        app_state: web::Data<AppState>,
         path: web::Path<(String, String, String, usize)>, 
         form: web::Json<AboNeuForm>, 
         req: HttpRequest,
     ) -> impl Responder {
-        
+
+        let response_err = |code: usize, text: String| {
+
+            let json = serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
+                code: code,
+                text: text,
+            })).unwrap_or_default();
+
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(json)
+        };
+
         let (_token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => { return e; },
         };
         let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt) = &*path;
         
-        let abo = crate::db::delete_abo(
-            &email_oder_webhook, 
-            &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), 
-            &benutzer.email, 
-            form.tag.as_ref().map(|s| s.as_str())
-        );
-
-        let json = match abo {
-            Err(e) => {
-                serde_json::to_string_pretty(&AboNeuAnfrage::Err(AboNeuAnfrageErr {
-                    code: 0,
-                    text: format!("{e}"),
-                })).unwrap_or_default()
-            },
-            Ok(()) => {
-                serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { }))
-                .unwrap_or_default()
-            }
+        let abo_return = if app_state.k8s_aktiv() {
+            super::write_to_root_db(DbChangeOp::AboLoeschen(AboLoeschenArgs {
+                typ: email_oder_webhook.clone(),
+                blatt: format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"),
+                text: benutzer.email.clone(),
+                aktenzeichen: form.tag.clone(),
+            })).await
+        } else {
+            crate::db::delete_abo(
+                MountPoint::Local,
+                &email_oder_webhook, 
+                &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"), 
+                &benutzer.email, 
+                form.tag.as_ref().map(|s| s.as_str())
+            )
         };
-        
-        HttpResponse::Ok()
-        .content_type("application/json")
-        .body(json)
+        match abo_return {
+            Ok(()) => {
+                HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk { 
+                })).unwrap_or_default())
+            },
+            Err(e) => response_err(500, format!("Fehler beim Löschen des Abonnements: {e}"))
+        }
     }
 }

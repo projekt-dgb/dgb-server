@@ -1,10 +1,9 @@
-use crate::models::{Titelblatt, BvEintrag, Grundbuch, Abt2Eintrag, Abt3Eintrag};
+use crate::models::{Titelblatt, BvEintrag, Grundbuch};
 use printpdf::{
-    BuiltinFont, PdfDocument, Mm, IndirectFontRef,
+    BuiltinFont, Mm, IndirectFontRef,
     PdfDocumentReference, PdfLayerReference,
     Line, Point, Color, Cmyk, Pt,
 };
-use std::path::Path;
 use std::collections::BTreeMap;
 use hyphenation::{Language, Load, Standard};
 use textwrap::{Options, WordSplitter};
@@ -410,7 +409,6 @@ fn pt_to_mm(pt: Pt) -> Mm { pt.into() }
 impl PdfHeader {
 
     pub fn get_max_col_width(&self, col_id: usize) -> usize {
-        use self::PdfHeader::*;
         let spalten_lines = self.get_spalten_lines();
         let width = ((if col_id == spalten_lines.len() - 1 {
             self.get_starting_x_spalte_mm(0) + 

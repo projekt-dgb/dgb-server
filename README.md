@@ -46,12 +46,6 @@ Zugriff auf die Cloudflare-API zum Erstellen der `__acme-challenge` DNS-Einträg
 siehe https://link.medium.com/aQ4vqJ5Fjrb. Hierbei muss im 
 Cloudflare-Konto ein API-Schlüssel.
 
-Das `root-access.passwort` enthält ein gehashtes Einmal-Passwort 
-(argon2id13 - kann mit https://argon2.online generiert werden), 
-welches nur einmal für 30 Minuten gültig ist. Es kann neu gesetzt 
-werden, indem man `kubectl apply -f k8s/secrets.yml` erneut ausführt
-und / oder die Pods neu startet. 
-
 Wenn man sich mit diesem Einmal-Passwort anmeldet, können Benutzerkonten 
 verwaltet / angelegt / archiviert werden, ansonsten nicht. Konten werden
 nie gelöscht, da ansonsten der PublicKey verloren geht, welcher zum 

@@ -2,56 +2,55 @@
 
 use serde_derive::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
-pub fn get_db_path() -> String {
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+pub enum MountPoint {
+    Local,
+    Remote,
+}
+
+pub fn get_local_path() -> String {
     std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
+    .unwrap()
+    .parent()
+    .unwrap()
+    .join("local")
+    .to_str()
+    .unwrap_or_default()
+    .to_string()
+}
+
+pub fn get_remote_path() -> String {
+    std::env::var("REMOTE_MOUNT_POINT")
+    .unwrap_or("/mnt/data/files".to_string())
+}
+
+pub fn get_base_path(mount_point: MountPoint) -> String {
+    match mount_point {
+        MountPoint::Local => get_local_path(),
+        MountPoint::Remote => get_remote_path(),
+    }
+}
+
+pub fn get_db_path(mount_point: MountPoint) -> String {
+    Path::new(&get_base_path(mount_point))
         .join("benutzer.sqlite.db")
         .to_str()
         .unwrap_or_default()
         .to_string()
 }
 
-pub fn get_data_dir() -> String {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
+pub fn get_data_dir(mount_point: MountPoint) -> String {
+    Path::new(&get_base_path(mount_point))
         .join("data")
         .to_str()
         .unwrap_or_default()
         .to_string()
 }
 
-pub fn get_logs_dir() -> String {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("logs")
-        .to_str()
-        .unwrap_or_default()
-        .to_string()
-}
-
-pub fn get_keys_dir() -> String {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("keys")
-        .to_str()
-        .unwrap_or_default()
-        .to_string()
-}
-
 pub fn get_index_dir() -> String {
-    std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
+    Path::new(&get_base_path(MountPoint::Local))
         .join("index")
         .to_str()
         .unwrap_or_default()

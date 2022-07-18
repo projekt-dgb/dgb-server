@@ -1,17 +1,11 @@
 use std::io::{self, Write};
 
-use sequoia_openpgp as openpgp;
-
 use sequoia_openpgp::cert::prelude::*;
-use sequoia_openpgp::serialize::stream::*;
 use sequoia_openpgp::parse::{Parse, stream::*};
 use sequoia_openpgp::policy::Policy;
-use sequoia_openpgp::policy::StandardPolicy as P;
+use sequoia_openpgp::parse::PacketParser;
 
 pub fn parse_cert(cert: &[u8]) -> Result<sequoia_openpgp::Cert, String> {
-    use std::convert::TryFrom;
-    use sequoia_openpgp::cert::prelude::*;
-    use sequoia_openpgp::parse::PacketParser;
 
     let ppr = PacketParser::from_bytes(cert)
     .map_err(|e| format!("{e}"))?;

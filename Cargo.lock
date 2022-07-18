@@ -1004,12 +1004,11 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-async",
- "slog-json",
+ "slog-term",
  "sodiumoxide",
  "tantivy",
  "textwrap",
  "tokio",
- "url_encoded_data",
  "urlencoding",
  "uuid 1.1.2",
 ]
@@ -1279,6 +1278,15 @@ name = "entities"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5320ae4c3782150d900b79807611a59a99fc9a1d61d686faafc24b93fc8d7ca"
+
+[[package]]
+name = "erased-serde"
+version = "0.3.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81d013529d5574a60caeda29e179e695125448e5de52e3874f7b4c1d7360e18e"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "fail"
@@ -3451,6 +3459,9 @@ name = "slog"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8347046d4ebd943127157b94d63abb990fcf729dc4e9978927fdf4ac3c998d06"
+dependencies = [
+ "erased-serde",
+]
 
 [[package]]
 name = "slog-async"
@@ -3465,14 +3476,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "slog-json"
-version = "2.6.1"
+name = "slog-term"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e1e53f61af1e3c8b852eef0a9dee29008f55d6dd63794f3f12cef786cf0f219"
+checksum = "87d29185c55b7b258b4f120eab00f48557d4d9bc814f41713f449d35b0f8977c"
 dependencies = [
+ "atty",
+ "erased-serde",
  "serde",
  "serde_json",
  "slog",
+ "term",
+ "thread_local",
  "time 0.3.9",
 ]
 
@@ -4195,16 +4210,6 @@ dependencies = [
  "idna",
  "matches",
  "percent-encoding",
-]
-
-[[package]]
-name = "url_encoded_data"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e1fdf35657b22e2c3b485cfb5ab66d5aa9dd5b0dce9902a314a830e2ea05972"
-dependencies = [
- "anyhow",
- "url",
 ]
 
 [[package]]

@@ -13,8 +13,11 @@
 //! während man mit /index/commits die Versionsgeschichte 
 //! durchsuchen kann.
 
-use crate::models::{PdfFile, Titelblatt, get_index_dir, get_data_dir};
-use tantivy::schema::{Schema, SchemaBuilder};
+use crate::{
+    MountPoint, 
+    models::{PdfFile, get_index_dir, get_data_dir}
+};
+use tantivy::schema::Schema;
 use tantivy::schema::*;
 use tantivy::{Index, IndexWriter};
 use std::path::Path;
@@ -50,7 +53,7 @@ pub fn index_all() -> Result<(), String> {
     use git2::{Repository, TreeWalkMode, TreeWalkResult, ObjectType};
     use std::collections::BTreeSet;
 
-    let data_path = get_data_dir();
+    let data_path = get_data_dir(MountPoint::Local);
     
     if !Path::new(&data_path).exists() {
         return Ok(()); // nichts zu tun
@@ -75,7 +78,7 @@ pub fn index_all() -> Result<(), String> {
     
     commits.reverse();
     
-    let data_dir = get_data_dir();
+    let data_dir = get_data_dir(MountPoint::Local);
     let data_dir = Path::new(&data_dir);
     
     let (grundbuch_schema, grundbuch_index) = get_grundbuch_index()
@@ -202,7 +205,6 @@ pub fn add_grundbuchblatt_zu_index(
     schema: &Schema
 ) -> Result<(), String>  {
     
-    use tantivy::doc;
     use crate::models::{BvEintrag};
     
     let file_name = format!(

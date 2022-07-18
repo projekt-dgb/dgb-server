@@ -1,24 +1,73 @@
 //! Operationen über die Benutzer-Datenbank
 
 use rusqlite::{Connection, OpenFlags};
-use crate::models::{BenutzerInfo, AbonnementInfo, get_db_path, get_keys_dir};
+use crate::{
+    MountPoint,
+    api::pull::{PullResponseError, PullResponse},
+    models::{BenutzerInfo, AbonnementInfo, get_db_path}
+};
 use chrono::{DateTime, Utc};
 use serde_derive::{Serialize, Deserialize};
 use std::collections::BTreeMap;
 
 pub type GemarkungsBezirke = Vec<(String, String, String)>;
+const PASSWORD_LEN: usize = 128;
 
-pub fn create_database() -> Result<(), rusqlite::Error> {
+pub async fn pull_db() -> Result<(), PullResponseError> {
+    
+    let k8s = crate::k8s::is_running_in_k8s().await;
+    if !k8s {
+        return Ok(());
+    }
+    
+    let k8s_peers = crate::k8s::k8s_get_peer_ips().await
+    .map_err(|_| PullResponseError {
+        code: 500, 
+        text: "Kubernetes aktiv, konnte aber Pods nicht lesen (keine ClusterRole-Berechtigung?)".to_string()
+    })?;
+
+    for peer in k8s_peers.iter() {
+                
+        let client = reqwest::Client::new();
+        let res = client.post(&format!("http://{}:8081/pull", peer.ip))
+            .send()
+            .await;
+        
+        let json = match res {
+            Ok(o) => o.json::<PullResponse>().await,
+            Err(e) => {
+                return Err(PullResponseError {
+                    code: 500,
+                    text: format!("Pod {}:{} konnte nicht synchronisiert werden: {e}", peer.namespace, peer.name),
+                });
+            },
+        };
+
+        match json {
+            Ok(PullResponse::StatusOk(_)) => { },
+            Ok(PullResponse::StatusError(e)) => return Err(e),
+            Err(e) => {
+                return Err(PullResponseError {
+                    code: 500,
+                    text: format!("Pod {}:{} konnte nicht synchronisiert werden: {e}", peer.namespace, peer.name),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
 
     let mut open_flags = OpenFlags::empty();
 
-    open_flags.set(OpenFlags::SQLITE_OPEN_CREATE, true);
-    open_flags.set(OpenFlags::SQLITE_OPEN_FULL_MUTEX, true);
     open_flags.set(OpenFlags::SQLITE_OPEN_NOFOLLOW, true);
-    open_flags.set(OpenFlags::SQLITE_OPEN_SHARED_CACHE, true);
+    open_flags.set(OpenFlags::SQLITE_OPEN_PRIVATE_CACHE, true);
+    open_flags.set(OpenFlags::SQLITE_OPEN_CREATE, true);
     open_flags.set(OpenFlags::SQLITE_OPEN_READ_WRITE, true);
-
-    let conn = Connection::open_with_flags(get_db_path(), open_flags)?;
+    
+    let conn = Connection::open_with_flags(get_db_path(mount_point), open_flags)?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS benutzer (
@@ -65,8 +114,7 @@ pub fn create_database() -> Result<(), rusqlite::Error> {
         "CREATE TABLE IF NOT EXISTS publickeys (
                 email           VARCHAR(255) NOT NULL,
                 pubkey          TEXT NOT NULL,
-                fingerprint     VARCHAR(2048) NOT NULL,
-                benutzt         INTEGER NOT NULL
+                fingerprint     VARCHAR(2048) NOT NULL
         )",
         [],
     )?;
@@ -74,9 +122,15 @@ pub fn create_database() -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
-pub fn create_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), String> {
-    let conn = Connection::open(get_db_path())
-        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+pub fn create_gemarkung(
+    mount_point: MountPoint, 
+    land: &str, 
+    amtsgericht: &str, 
+    bezirk: &str,
+) -> Result<(), String> {
+
+    let conn = Connection::open(get_db_path(mount_point))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
         "INSERT INTO bezirke (land, amtsgericht, bezirk) VALUES (?1, ?2, ?3)",
@@ -90,12 +144,12 @@ pub fn create_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(
 }
 
 pub fn get_gemarkungen() -> Result<GemarkungsBezirke, String> {
-    let conn = Connection::open(get_db_path())
-        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
         .prepare("SELECT land, amtsgericht, bezirk FROM bezirke")
-        .map_err(|e| format!("Fehler beim Auslesen der Bezirke"))?;
+        .map_err(|_| format!("Fehler beim Auslesen der Bezirke"))?;
 
     let bezirke = stmt
         .query_map([], |row| {
@@ -116,8 +170,14 @@ pub fn get_gemarkungen() -> Result<GemarkungsBezirke, String> {
     Ok(bz)
 }
 
-pub fn delete_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(), String> {
-    let conn = Connection::open(get_db_path())
+pub fn delete_gemarkung(
+    mount_point: MountPoint, 
+    land: &str, 
+    amtsgericht: &str, 
+    bezirk: &str,
+) -> Result<(), String> {
+    
+    let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
@@ -131,34 +191,40 @@ pub fn delete_gemarkung(land: &str, amtsgericht: &str, bezirk: &str) -> Result<(
     Ok(())
 }
 
-pub fn create_user(name: &str, email: &str, passwort: &str, rechte: &str) -> Result<(), String> {
+pub fn create_user(
+    mount_point: MountPoint, 
+    name: &str, 
+    email: &str, 
+    passwort: &str, 
+    rechte: &str, 
+    pubkey: Option<GpgPublicKeyPair>
+) -> Result<(), String> {
+    
     if passwort.len() > 50 {
         return Err(format!("Passwort zu lang"));
     }
 
-    let conn = Connection::open(get_db_path())
-        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
-
     let password_hashed = hash_password(passwort).as_ref().to_vec();
 
-    let public_key = create_gpg_key(name, email)?;
-    conn.execute(
-        "INSERT INTO publickeys (email, fingerprint, pubkey, benutzt) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![email, public_key.0, public_key.1, 0],
-    ).map_err(|e| format!("Fehler beim Einfügen von publickey für {email} in Datenbank: {e}"))?;
-    
+    let conn = Connection::open(get_db_path(mount_point))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
     conn.execute(
         "INSERT INTO benutzer (email, name, rechte, password_hashed) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![email, name, rechte, password_hashed],
     )
-    .map_err(|e| format!("Fehler beim Einfügen von {email} in Datenbank: {e}"))?;
+    .map_err(|e| format!("Fehler beim Einfügen von Benutzer in Datenbank: {e}"))?;
+
+    if let Some(public_key) = pubkey.as_ref() {
+        conn.execute(
+            "INSERT INTO publickeys (email, fingerprint, pubkey) VALUES (?1, ?2, ?3)",
+            rusqlite::params![email, public_key.fingerprint, public_key.public.join("\r\n")],
+        ).map_err(|e| format!("Fehler beim Einfügen von publickey für {email} in Datenbank: {e}"))?;    
+    }
 
     Ok(())
 }
 
-const PASSWORD_LEN: usize = 128;
-
-// Passwort -> Salted PW
 fn hash_password(password: &str) -> [u8; PASSWORD_LEN] {
     use sodiumoxide::crypto::pwhash::argon2id13;
     use sodiumoxide::crypto::pwhash::argon2id13::HashedPassword;
@@ -206,9 +272,22 @@ fn verify_password(database_pw: &[u8], password: &str) -> bool {
     }
 }
 
-fn create_gpg_key(name: &str, email: &str) -> Result<(String, String), String> {
+/// Gleicht `GpgKeyPair`, nur ohne den privaten Schlüssel
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct GpgPublicKeyPair {
+    pub fingerprint: String,
+    pub public: Vec<String>,
+}
 
-    use std::path::Path;
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct GpgKeyPair {
+    pub fingerprint: String,
+    pub public: Vec<String>,
+    pub private: Vec<String>,
+}
+
+pub fn create_gpg_key(name: &str, email: &str) -> Result<GpgKeyPair, String> {
+
     use sequoia_openpgp::serialize::SerializeInto;
 
     let key = crate::pgp::generate(&format!("{name} <{email}>"))
@@ -219,21 +298,20 @@ fn create_gpg_key(name: &str, email: &str) -> Result<(String, String), String> {
         
     let secret_key = String::from_utf8(bytes)
     .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
-    
-    let _ = std::fs::create_dir_all(get_keys_dir());
-    
-    std::fs::write(Path::new(&get_keys_dir()).join(&format!("{email}.gpg")), &secret_key)
-        .map_err(|e| format!("Konnte GPG-Schlüssel nicht in /keys speichern: {key}: {e}"))?;
-        
+            
     let public_key_bytes = key.armored().to_vec()
         .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
     
     let public_key_str = String::from_utf8(public_key_bytes)
     .map_err(|e| format!("Konnte kein Zertifikat generieren: {key}: {e}"))?;
     
-    let fingerprint = key.fingerprint();
+    let fingerprint = key.fingerprint().to_string();
 
-    Ok((fingerprint.to_string(), public_key_str))
+    Ok(GpgKeyPair {
+        fingerprint,
+        public: public_key_str.lines().map(|s| s.to_string()).collect(),
+        private: secret_key.lines().map(|s| s.to_string()).collect(),
+    })
 }
 
 pub fn get_key_for_fingerprint(fingerprint: &str, email: &str) -> Result<sequoia_openpgp::Cert, String> {
@@ -242,7 +320,7 @@ pub fn get_key_for_fingerprint(fingerprint: &str, email: &str) -> Result<sequoia
     use sequoia_openpgp::Cert;
     use sequoia_openpgp::parse::Parse;
     
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
     
     let mut stmt = conn
@@ -278,7 +356,7 @@ pub struct KontoData {
 pub fn get_konto_data(benutzer: &BenutzerInfo) -> Result<KontoData, String> {
 
     let mut data = KontoData::default();
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     match benutzer.rechte.as_str() {
@@ -295,26 +373,8 @@ pub fn get_konto_data(benutzer: &BenutzerInfo) -> Result<KontoData, String> {
 }
 
 pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
-    
-    let root_token = std::env::var("ROOT_TOKEN");
-    let root_email = std::env::var("ROOT_EMAIL");
-    let root_gueltig_bis = std::env::var("ROOT_GUELTIG_BIS").ok()
-        .and_then(|gueltig_bis| DateTime::parse_from_rfc3339(&gueltig_bis).ok());
-    let now = Utc::now();
 
-    match (root_token, root_email, root_gueltig_bis) {
-        (Ok(token), Ok(root_email), Some(r)) if r > now => {
-            return Ok(BenutzerInfo {
-                id: i32::MAX, 
-                name: "Administrator".to_string(), 
-                email: root_email.clone(), 
-                rechte: "admin".to_string(), 
-            })
-        },
-        _ => { }
-    }
-
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
@@ -374,39 +434,25 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
     })
 }
 
-pub fn create_login_user_token(email: &str, passwort: &str) -> Result<(BenutzerInfo, String, DateTime<Utc>), String> {
-    
-    use uuid::Uuid;
+pub fn generate_token() -> (String, DateTime<Utc>) {
 
-    let root_email = std::env::var("ROOT_EMAIL");
-    let root_passwort = std::env::var("ROOT_PASSWORT");
+    use uuid::Uuid;
 
     let gueltig_bis = Utc::now();
     let gueltig_bis = gueltig_bis.checked_add_signed(chrono::Duration::minutes(30)).unwrap_or(gueltig_bis);
     let token = Uuid::new_v4();
     let token = format!("{token}");
 
-    if let (Ok(email), Ok(root_passwort_hashed)) = (root_email, root_passwort) {
+    (token, gueltig_bis)
+}
 
-        if !verify_password(root_passwort_hashed.as_bytes(), &passwort) {
-            return Err(format!("Ungültiges Passwort"));
-        }
-
-        std::env::set_var("ROOT_TOKEN", token.clone());
-        std::env::set_var("ROOT_GUELTIG_BIS", gueltig_bis.to_rfc3339());
-        std::env::remove_var("ROOT_PASSWORT");
-
-        sync_env_vars();
-
-        return Ok((BenutzerInfo {
-            id: i32::MAX, 
-            name: "Administrator".to_string(), 
-            email: email.clone(), 
-            rechte: "admin".to_string(), 
-        }, token.clone(), gueltig_bis.clone()));
-    }
-
-    let conn = Connection::open(get_db_path())
+pub fn check_password(
+    mount_point: MountPoint, 
+    email: &str, 
+    passwort: &str,
+) -> Result<(BenutzerInfo, String, DateTime<Utc>), String> {
+    
+    let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
@@ -428,7 +474,7 @@ pub fn create_login_user_token(email: &str, passwort: &str) -> Result<(BenutzerI
 
     let (id, name, email, rechte, pw) = match benutzer.get(0) {
         Some(Ok(s)) => s,
-        _ => return Err(format!("Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden")),
+        _ => { return Err(format!("Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden")); },
     };
 
     if !verify_password(&pw, &passwort) {
@@ -456,27 +502,55 @@ pub fn create_login_user_token(email: &str, passwort: &str) -> Result<(BenutzerI
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
         .collect::<Vec<_>>();
 
-    
-    if let Some((token, gueltig_bis)) = tokens.get(0)
-    .and_then(|t| t.as_ref().ok().and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)))) {
-        return Ok((info, token.clone(), gueltig_bis.into()));
+    match tokens.get(0).and_then(|t| t.as_ref().ok().and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)))) {
+        Some((token, gueltig_bis)) => Ok((info, token.clone(), gueltig_bis.into())),
+        None => Err(format!("Kein gültiges Token für Benutzer / Passwort gefunden")),
     }
+}
+
+pub fn insert_token_into_sessions(
+    mount_point: MountPoint, 
+    email: &str, 
+    token: &str,
+    gueltig_bis: &DateTime<Utc>,
+) -> Result<(), String> {
+    
+    let conn = Connection::open(get_db_path(mount_point))
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT id, name, email, rechte, password_hashed FROM benutzer WHERE email = ?1")
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+    
+    let benutzer = stmt
+        .query_map(rusqlite::params![email], |row| {
+            Ok((
+                row.get::<usize, i32>(0)?,
+                row.get::<usize, String>(1)?,
+                row.get::<usize, String>(2)?,
+                row.get::<usize, String>(3)?,
+                row.get::<usize, Vec<u8>>(4)?,
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .collect::<Vec<_>>();
+
+    let (id, name, email, rechte, pw) = match benutzer.get(0) {
+        Some(Ok(s)) => s,
+        _ => { return Err(format!("Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden")); },
+    };
 
     conn.execute(
         "INSERT INTO sessions (id, token, gueltig_bis) VALUES (?1, ?2, ?3)",
-        rusqlite::params![info.id, token, gueltig_bis.to_rfc3339()],
+        rusqlite::params![id, token, gueltig_bis.to_rfc3339()],
     ).map_err(|e| format!("Fehler beim Einfügen von Token in Sessions: {e}"))?;
-
-    Ok((info, token, gueltig_bis))
-}
-
-// TODO!
-pub fn sync_env_vars() {
-
+    
+    Ok(())
 }
 
 pub fn get_public_key(email: &str, fingerprint: &str) -> Result<String, String> {
-    let conn = Connection::open(get_db_path())
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
@@ -501,26 +575,36 @@ pub fn get_public_key(email: &str, fingerprint: &str) -> Result<String, String> 
     }
 }
 
-pub fn delete_user(email: &str) -> Result<(), String> {
-    let conn = Connection::open(get_db_path())
+pub fn delete_user(
+    mount_point: MountPoint, 
+    email: &str
+) -> Result<(), String> {
+   
+    let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
         "DELETE FROM benutzer WHERE email = ?1",
         rusqlite::params![email],
     )
-    .map_err(|e| format!("Fehler beim Löschen von {email}: {e}"))?;
+    .map_err(|e| format!("Fehler beim Löschen von Benutzer: {e}"))?;
     
     conn.execute(
-        "DELETE FROM publickeys WHERE email = ?1 AND benutzt = 0",
+        "DELETE FROM publickeys WHERE email = ?1",
         rusqlite::params![email],
     )
-    .map_err(|e| format!("Fehler beim Löschen von {email}: {e}"))?;
+    .map_err(|e| format!("Fehler beim Löschen von Benutzer: {e}"))?;
 
     Ok(())
 }
 
-pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>) -> Result<(), String> {
+pub fn create_abo(
+    mount_point: MountPoint, 
+    typ: &str, 
+    blatt: &str, 
+    text: &str, 
+    aktenzeichen: Option<&str>
+) -> Result<(), String> {
     
     match typ {
         "email" | "webhook" => { },
@@ -556,7 +640,7 @@ pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>
         }
     };
 
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
@@ -569,7 +653,7 @@ pub fn create_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>
 
 pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementInfo>, String> {
     
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
         
     let mut stmt = conn
@@ -644,7 +728,7 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
         }
     };
     
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
         
     let mut stmt = conn
@@ -677,7 +761,13 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
     Ok(bz)
 }
 
-pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>) -> Result<(), String> {
+pub fn delete_abo(
+    mount_point: MountPoint, 
+    typ: &str, 
+    blatt: &str, 
+    text: &str, 
+    aktenzeichen: Option<&str>
+) -> Result<(), String> {
     
     match typ {
         "email" | "webhook" => { },
@@ -713,7 +803,7 @@ pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>
         }
     };
 
-    let conn = Connection::open(get_db_path())
+    let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     match aktenzeichen.as_ref() {
@@ -728,7 +818,6 @@ pub fn delete_abo(typ: &str, blatt: &str, text: &str, aktenzeichen: Option<&str>
                 "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND typ = ?5",
                 rusqlite::params![text, amtsgericht, bezirk, b, typ],
             ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
-        
         }
     }
 

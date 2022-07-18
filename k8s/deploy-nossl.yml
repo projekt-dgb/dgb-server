@@ -51,28 +51,6 @@ spec:
                 secretKeyRef: 
                   name: root-access 
                   key: smtp-passwort  
-      volumes:
-        - name: persistent-volume
-          persistentVolumeClaim:
-            claimName: persistent-volume
-      imagePullSecrets:
-        - name: registrypullsecret
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: dgb-synchronizer
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: dgb-synchronizer
-  template:
-    metadata:
-      labels:
-        app: dgb-synchronizer
-    spec:
-      containers:
         - name: synchronizer
           image: grundbuch/dgb-server:latest
           imagePullPolicy: Always
