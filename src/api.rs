@@ -1,6 +1,7 @@
 use actix_web::{HttpRequest, HttpResponse};
 use std::collections::BTreeMap;
 use crate::models::BenutzerInfo;
+use crate::AppState;
 
 async fn get_benutzer_from_httpauth(req: &HttpRequest) -> Result<(String, BenutzerInfo), HttpResponse> {
     use self::upload::{UploadChangesetResponse, UploadChangesetResponseError};
@@ -33,9 +34,18 @@ async fn get_benutzer_from_httpauth_inner(req: &HttpRequest) -> Result<(String, 
     Ok((token.to_string(), user))
 }
 
-async fn write_to_root_db(change: commit::DbChangeOp) -> Result<(), String> {
+pub(crate) async fn write_to_root_db(change: commit::DbChangeOp, app_state: &AppState) -> Result<(), String> {
 
     use crate::api::commit::{CommitResponse, CommitResponseOk};
+
+    if !app_state.k8s_aktiv() {
+        let result = crate::api::commit::db_change_inner(&change, app_state);
+
+        crate::db::pull_db().await
+        .map_err(|e| format!("Fehler beim Synchronisieren der Datenbanken (pull): {}: {}", e.code, e.text))?;
+
+        return result;
+    };
 
     let k8s_peers = crate::k8s::k8s_get_peer_ips().await
     .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
@@ -132,7 +142,7 @@ pub mod login {
     use actix_web::{get, post, web, HttpRequest, Responder, HttpResponse};
     use serde_derive::{Serialize, Deserialize};
     use chrono::{DateTime, Utc};
-    use crate::MountPoint;
+    use crate::{MountPoint, AppState};
 
     // Login-Seite
     #[get("/login")]
@@ -171,14 +181,14 @@ pub mod login {
 
     // Login-Seite
     #[post("/login")]
-    async fn login_post(form: web::Form<LoginForm>, req: HttpRequest) -> impl Responder {        
-        let response = login_json(&form.email, &form.passwort).await;
+    async fn login_post(app_state: web::Data<AppState>, form: web::Form<LoginForm>, req: HttpRequest) -> impl Responder {        
+        let response = login_json(&form.email, &form.passwort, &*app_state).await;
         HttpResponse::Ok()
         .content_type("application/json; charset=utf-8")
         .body(serde_json::to_string_pretty(&response).unwrap_or_default())
     }
 
-    pub async fn login_json(email: &str, passwort: &str) -> LoginResponse {
+    pub async fn login_json(email: &str, passwort: &str, app_state: &AppState) -> LoginResponse {
         
         use crate::api::commit::DbChangeOp;
 
@@ -204,7 +214,7 @@ pub mod login {
                     email: email.to_string(), 
                     token: token.clone(), 
                     gueltig_bis: gueltig_bis.clone(), 
-                }).await {
+                }, app_state).await {
                     Ok(_) => { },
                     Err(e) => {
                         return LoginResponse::Error(LoginResponseError {
@@ -439,16 +449,53 @@ pub mod commit {
         app_state: web::Data<AppState>,
         req: HttpRequest
     ) -> impl Responder {
-        match db_change_internal(&upload_changeset, &app_state, &req).await {
+        match db_change_internal(&upload_changeset, &app_state) {
             Ok(o) => o,
             Err(e) => e,
         }
     }
 
-    async fn db_change_internal(
+    pub(crate) fn db_change_inner(
         change_op: &DbChangeOp,
         app_state: &AppState,
-        req: &HttpRequest
+    ) -> Result<(), String> {
+        let mount_point_write = if app_state.k8s_aktiv() { MountPoint::Remote } else { MountPoint::Local };
+
+        match change_op {
+            DbChangeOp::BenutzerNeu(un) => {
+                crate::db::create_user(
+                    mount_point_write, 
+                    &un.name, 
+                    &un.email, 
+                    &un.passwort, 
+                    &un.rechte,
+                    un.schluessel.clone(),
+                )
+            },
+            DbChangeOp::BenutzerLoeschen(ul) => {
+                crate::db::delete_user(mount_point_write, &ul.email)
+            }
+            DbChangeOp::BezirkNeu(bn) => {
+                crate::db::create_gemarkung(mount_point_write, &bn.land, &bn.amtsgericht, &bn.bezirk)
+            }
+            DbChangeOp::BezirkLoeschen(bl) => {
+                crate::db::delete_gemarkung(mount_point_write, &bl.land, &bl.amtsgericht, &bl.bezirk)
+            }
+            DbChangeOp::AboNeu(an) => {
+                crate::db::create_abo(mount_point_write, &an.typ, &an.blatt, &an.text, an.aktenzeichen.as_ref().map(|s| s.as_str()))
+            }
+            DbChangeOp::AboLoeschen(al) => {
+                crate::db::delete_abo(mount_point_write, &al.typ, &al.blatt, &al.text, al.aktenzeichen.as_ref().map(|s| s.as_str()))
+            },
+            DbChangeOp::BenutzerSessionNeu { email, token, gueltig_bis } => {
+                crate::db::insert_token_into_sessions(mount_point_write, email, token, gueltig_bis)
+            }
+        }
+    }
+
+    fn db_change_internal(
+        change_op: &DbChangeOp,
+        app_state: &AppState,
     ) -> Result<HttpResponse, HttpResponse> {
         
         let response_err = |code: usize, text: String| {
@@ -470,58 +517,9 @@ pub mod commit {
             })).unwrap_or_default())
         };
 
-        let mount_point_write = if app_state.k8s_aktiv() { MountPoint::Remote } else { MountPoint::Local };
-
-        match change_op {
-            DbChangeOp::BenutzerNeu(un) => {
-                match crate::db::create_user(
-                    mount_point_write, 
-                    &un.name, 
-                    &un.email, 
-                    &un.passwort, 
-                    &un.rechte,
-                    un.schluessel.clone(),
-                ) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            },
-            DbChangeOp::BenutzerLoeschen(ul) => {
-                match crate::db::delete_user(mount_point_write, &ul.email) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            }
-            DbChangeOp::BezirkNeu(bn) => {
-                match crate::db::create_gemarkung(mount_point_write, &bn.land, &bn.amtsgericht, &bn.bezirk) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            }
-            DbChangeOp::BezirkLoeschen(bl) => {
-                match crate::db::delete_gemarkung(mount_point_write, &bl.land, &bl.amtsgericht, &bl.bezirk) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            }
-            DbChangeOp::AboNeu(an) => {
-                match crate::db::create_abo(mount_point_write, &an.typ, &an.blatt, &an.text, an.aktenzeichen.as_ref().map(|s| s.as_str())) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            }
-            DbChangeOp::AboLoeschen(al) => {
-                match crate::db::delete_abo(mount_point_write, &al.typ, &al.blatt, &al.text, al.aktenzeichen.as_ref().map(|s| s.as_str())) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            },
-            DbChangeOp::BenutzerSessionNeu { email, token, gueltig_bis } => {
-                match crate::db::insert_token_into_sessions(mount_point_write, email, token, gueltig_bis) {
-                    Ok(()) => Ok(response_ok()),
-                    Err(s) => Err(response_err(500, s)),
-                }
-            }
+        match db_change_inner(change_op, app_state) {
+            Ok(()) => Ok(response_ok()),
+            Err(e) => Err(response_err(500, e)),
         }
     }
 }
@@ -1457,7 +1455,7 @@ pub mod abo {
                 blatt: format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"),
                 text: benutzer.email.clone(),
                 aktenzeichen: form.tag.clone(),
-            })).await
+            }), &*app_state).await
         } else {
             crate::db::create_abo(
                 MountPoint::Local,
@@ -1511,7 +1509,7 @@ pub mod abo {
                 blatt: format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"),
                 text: benutzer.email.clone(),
                 aktenzeichen: form.tag.clone(),
-            })).await
+            }), &*app_state).await
         } else {
             crate::db::delete_abo(
                 MountPoint::Local,

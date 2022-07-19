@@ -164,6 +164,27 @@ pub struct BenutzerNeuArgsCli {
     pub schluessel: Option<PathBuf>,
 }
 
+impl BenutzerNeuArgsCli {
+    pub fn into_json(&self) -> Result<BenutzerNeuArgsJson, anyhow::Error> {
+        let schluessel = match self.schluessel.as_ref() {
+            Some(s) => {
+                let file_contents = std::fs::read_to_string(s)?;
+                let parsed = serde_json::from_str(&file_contents)?;
+                Some(parsed)
+            },
+            None => None,
+        };
+
+        Ok(BenutzerNeuArgsJson {
+            name: self.name.clone(),
+            email: self.email.clone(),
+            passwort: self.passwort.clone(),
+            rechte: self.rechte.clone(),
+            schluessel: schluessel,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BenutzerNeuArgsJson {
     /// Name des neuen Benutzers
@@ -290,12 +311,57 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
             println!("{:#?}", suchergebnisse);
             Ok(())
         },
-        BenutzerNeu(a) => crate::cli::create_user_cli(a).map_err(|e| format!("{e}")),
-        BenutzerLoeschen(a) => crate::cli::delete_user_cli(a).map_err(|e| format!("{e}")),
-        BezirkNeu(a) => crate::cli::create_bezirk_cli(a).map_err(|e| format!("{e}")),
-        BezirkLoeschen(a) => crate::cli::delete_bezirk_cli(a).map_err(|e| format!("{e}")),
-        AboNeu(a) => crate::cli::create_abo_cli(a).map_err(|e| format!("{e}")),
-        AboLoeschen(a) => crate::cli::delete_abo_cli(a).map_err(|e| format!("{e}")),
+        BenutzerNeu(a) => {
+            
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio: {e}"))?;
+
+            runtime.block_on(async move { crate::cli::create_user_cli(a).await.map_err(|e| format!("{e}")) })
+        },
+        BenutzerLoeschen(a) => {
+            
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio: {e}"))?;
+            
+            runtime.block_on(async move { crate::cli::delete_user_cli(a).await.map_err(|e| format!("{e}")) })
+        },
+        BezirkNeu(a) => {
+
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio: {e}"))?;
+
+            runtime.block_on(async move { crate::cli::create_bezirk_cli(a).await.map_err(|e| format!("{e}")) })
+        },
+        BezirkLoeschen(a) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio: {e}"))?;
+
+            runtime.block_on(async move { crate::cli::delete_bezirk_cli(a).await.map_err(|e| format!("{e}")) })
+        },
+        AboNeu(a) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio: {e}"))?;
+
+            runtime.block_on(async move { crate::cli::create_abo_cli(a).await.map_err(|e| format!("{e}")) })
+        },
+        AboLoeschen(a) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio: {e}"))?;
+
+            runtime.block_on(async move { crate::cli::delete_abo_cli(a).await.map_err(|e| format!("{e}")) })
+        },
     }
 }
 
