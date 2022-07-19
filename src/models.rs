@@ -12,18 +12,17 @@ pub enum MountPoint {
 
 pub fn get_local_path() -> String {
     std::env::current_exe()
-    .unwrap()
-    .parent()
-    .unwrap()
-    .join("local")
-    .to_str()
-    .unwrap_or_default()
-    .to_string()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("local")
+        .to_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 pub fn get_remote_path() -> String {
-    std::env::var("REMOTE_MOUNT_POINT")
-    .unwrap_or("/mnt/data/files".to_string())
+    std::env::var("REMOTE_MOUNT_POINT").unwrap_or("/mnt/data/files".to_string())
 }
 
 pub fn get_base_path(mount_point: MountPoint) -> String {
@@ -62,48 +61,48 @@ pub fn get_index_dir() -> String {
 pub struct PdfFile {
     // Pfad der zugehörigen .pdf-Datei
     #[serde(default)]
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub datei: Option<String>,
     /// Some(pfad) wenn Datei digital angelegt wurde
     #[serde(default)]
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gbx_datei_pfad: Option<String>,
     /// Land des Grundbuchs (z.B. "Brandenburg")
     #[serde(default)]
-    #[serde(skip_serializing_if="Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub land: Option<String>,
     /// Seitenzahlen im Grundbuch
-    #[serde(skip_serializing_if="Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
     pub seitenzahlen: Vec<u32>,
     /// Seiten, die geladen wurden
-    #[serde(skip_serializing_if="BTreeMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(default)]
     pub geladen: BTreeMap<String, SeiteParsed>,
     /// Layout der Seiten aus pdftotext
     #[serde(default)]
-    #[serde(skip_serializing_if="PdfToTextLayout::is_empty")]
+    #[serde(skip_serializing_if = "PdfToTextLayout::is_empty")]
     pub pdftotext_layout: PdfToTextLayout,
     /// Seitennummern von Seiten, die versucht wurden, geladen zu werden
     #[serde(default)]
-    #[serde(skip_serializing_if="BTreeSet::is_empty")]
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub seiten_versucht_geladen: BTreeSet<u32>,
     /// Seiten -> OCR Text (tesseract)
     #[serde(default)]
     pub seiten_ocr_text: BTreeMap<String, String>,
     /// Anpassungen in Zeilen und Spaltengrößen auf der Seite
-    #[serde(skip_serializing_if="BTreeMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(default)]
     pub anpassungen_seite: BTreeMap<String, AnpassungSeite>,
     /// Anpassungen im Seitentyp
-    #[serde(skip_serializing_if="BTreeMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     #[serde(default)]
     pub klassifikation_neu: BTreeMap<String, SeitenTyp>,
     /// Dateipfade zu .csv-Dateien für Nebenbeteiligte
     #[serde(default)]
-    #[serde(skip_serializing_if="Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub nebenbeteiligte_dateipfade: Vec<String>,
-    
+
     /// Analysiertes Grundbuch
     pub analysiert: Grundbuch,
 }
@@ -160,9 +159,9 @@ pub struct Bestandsverzeichnis {
 
 impl Bestandsverzeichnis {
     pub fn is_empty(&self) -> bool {
-        self.eintraege.is_empty() &&
-        self.zuschreibungen.is_empty() &&
-        self.abschreibungen.is_empty()
+        self.eintraege.is_empty()
+            && self.zuschreibungen.is_empty()
+            && self.abschreibungen.is_empty()
     }
 }
 
@@ -284,10 +283,12 @@ impl FlurstueckGroesse {
     pub fn get_m2(&self) -> u64 {
         match self {
             FlurstueckGroesse::Metrisch { m2 } => m2.unwrap_or(0),
-            FlurstueckGroesse::Hektar { ha, a, m2 } => ha.unwrap_or(0) * 100_000 + a.unwrap_or(0) * 100 + m2.unwrap_or(0),
+            FlurstueckGroesse::Hektar { ha, a, m2 } => {
+                ha.unwrap_or(0) * 100_000 + a.unwrap_or(0) * 100 + m2.unwrap_or(0)
+            }
         }
     }
-    
+
     pub fn get_ha_string(&self) -> String {
         let m2_string = format!("{}", self.get_m2());
         let mut m2_string_chars: Vec<char> = m2_string.chars().collect();
@@ -296,7 +297,7 @@ impl FlurstueckGroesse {
         }
         m2_string_chars.iter().collect()
     }
-    
+
     pub fn get_a_string(&self) -> String {
         let m2_string = format!("{}", self.get_m2());
         let mut m2_string_chars: Vec<char> = m2_string.chars().collect();
@@ -310,7 +311,7 @@ impl FlurstueckGroesse {
         }
         m2_string_chars.iter().collect()
     }
-    
+
     pub fn get_m2_string(&self) -> String {
         let m2_string = format!("{}", self.get_m2());
         let mut m2_string_chars: Vec<char> = m2_string.chars().collect();
@@ -320,7 +321,11 @@ impl FlurstueckGroesse {
         }
         m2_string_chars.reverse();
         let fi: String = m2_string_chars.iter().collect();
-        if fi.is_empty() { format!("0") } else { fi }
+        if fi.is_empty() {
+            format!("0")
+        } else {
+            fi
+        }
     }
 }
 
@@ -328,11 +333,11 @@ impl StringOrLines {
     pub fn text(&self) -> String {
         self.lines().join("\r\n")
     }
-    
+
     pub fn text_clean(&self) -> String {
         crate::pdf::unhyphenate(&self.lines().join("\r\n"))
     }
-    
+
     pub fn lines(&self) -> Vec<String> {
         match self {
             StringOrLines::SingleLine(s) => s.lines().map(|s| s.to_string()).collect(),
@@ -344,62 +349,71 @@ impl StringOrLines {
 impl BvEintrag {
     pub fn ist_geroetet(&self) -> bool {
         match self {
-            BvEintrag::Flurstueck(flst) => {
-                flst.manuell_geroetet.unwrap_or(flst.automatisch_geroetet.unwrap_or(false))
-            },
-            BvEintrag::Recht(recht) => {
-                recht.manuell_geroetet.unwrap_or(recht.automatisch_geroetet.unwrap_or(false))
-            }
+            BvEintrag::Flurstueck(flst) => flst
+                .manuell_geroetet
+                .unwrap_or(flst.automatisch_geroetet.unwrap_or(false)),
+            BvEintrag::Recht(recht) => recht
+                .manuell_geroetet
+                .unwrap_or(recht.automatisch_geroetet.unwrap_or(false)),
         }
     }
 }
 
 impl BvZuschreibung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl BvAbschreibung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt1GrundEintragung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt1EintragV1 {
     pub fn ist_geroetet(&self) -> bool {
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt1EintragV2 {
     pub fn ist_geroetet(&self) -> bool {
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt1Eintrag {
-
     pub fn get_lfd_nr(&self) -> usize {
         match self {
-            Abt1Eintrag::V1(v1) => { v1.lfd_nr },
-            Abt1Eintrag::V2(v2) => { v2.lfd_nr },
+            Abt1Eintrag::V1(v1) => v1.lfd_nr,
+            Abt1Eintrag::V2(v2) => v2.lfd_nr,
         }
     }
-    
+
     pub fn get_eigentuemer(&self) -> StringOrLines {
         match self {
-            Abt1Eintrag::V1(v1) => { v1.eigentuemer.clone() },
-            Abt1Eintrag::V2(v2) =>{ v2.eigentuemer.clone() },
+            Abt1Eintrag::V1(v1) => v1.eigentuemer.clone(),
+            Abt1Eintrag::V2(v2) => v2.eigentuemer.clone(),
         }
     }
-    
+
     pub fn ist_geroetet(&self) -> bool {
         match self {
             Abt1Eintrag::V1(v1) => v1.ist_geroetet(),
@@ -409,50 +423,66 @@ impl Abt1Eintrag {
 }
 
 impl Abt1Veraenderung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt1Loeschung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt2Eintrag {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt2Veraenderung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt2Loeschung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt3Eintrag {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt3Veraenderung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
 impl Abt3Loeschung {
-    pub fn ist_geroetet(&self) -> bool { 
-        self.manuell_geroetet.or(self.automatisch_geroetet.clone()).unwrap_or(false)
+    pub fn ist_geroetet(&self) -> bool {
+        self.manuell_geroetet
+            .or(self.automatisch_geroetet.clone())
+            .unwrap_or(false)
     }
 }
 
@@ -521,10 +551,10 @@ pub struct Abteilung1 {
 
 impl Abteilung1 {
     pub fn is_empty(&self) -> bool {
-        self.eintraege.is_empty() &&
-        self.grundlagen_eintragungen.is_empty() &&
-        self.veraenderungen.is_empty() &&
-        self.loeschungen.is_empty()
+        self.eintraege.is_empty()
+            && self.grundlagen_eintragungen.is_empty()
+            && self.veraenderungen.is_empty()
+            && self.loeschungen.is_empty()
     }
 }
 
@@ -568,7 +598,7 @@ pub struct Abt1EintragV1 {
     // lfd. Nr der betroffenen Grundstücke im Bestandsverzeichnis
     #[serde(default)]
     #[serde(skip_serializing_if = "StringOrLines::is_empty")]
-    pub bv_nr: StringOrLines, 
+    pub bv_nr: StringOrLines,
     // Vec<BvNr>,
     #[serde(default)]
     #[serde(skip_serializing_if = "StringOrLines::is_empty")]
@@ -593,7 +623,7 @@ pub struct Abt1GrundEintragung {
     #[serde(default)]
     #[serde(skip_serializing_if = "StringOrLines::is_empty")]
     pub text: StringOrLines,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub automatisch_geroetet: Option<bool>,
     #[serde(default)]
@@ -603,7 +633,6 @@ pub struct Abt1GrundEintragung {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_pdf: Option<PositionInPdf>,
 }
-
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Abt1Veraenderung {
@@ -658,9 +687,7 @@ pub struct Abteilung2 {
 
 impl Abteilung2 {
     pub fn is_empty(&self) -> bool {
-        self.eintraege.is_empty() &&
-        self.veraenderungen.is_empty() &&
-        self.loeschungen.is_empty()
+        self.eintraege.is_empty() && self.veraenderungen.is_empty() && self.loeschungen.is_empty()
     }
 }
 
@@ -739,12 +766,9 @@ pub struct Abteilung3 {
 
 impl Abteilung3 {
     pub fn is_empty(&self) -> bool {
-        self.eintraege.is_empty() &&
-        self.veraenderungen.is_empty() &&
-        self.loeschungen.is_empty()
+        self.eintraege.is_empty() && self.veraenderungen.is_empty() && self.loeschungen.is_empty()
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Abt3Eintrag {
@@ -841,7 +865,7 @@ pub struct Textblock {
 pub struct AnpassungSeite {
     #[serde(default)]
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub spalten: BTreeMap<String, Rect>,    
+    pub spalten: BTreeMap<String, Rect>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub zeilen: Vec<f32>,
@@ -904,7 +928,9 @@ pub struct PdfToTextLayout {
 }
 
 impl PdfToTextLayout {
-    pub fn is_empty(&self) -> bool { self.seiten.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.seiten.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

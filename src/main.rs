@@ -44,57 +44,65 @@
 //!   Bei Änderungen des Grundbuchblatts wird die angegebene E-Mail im Abonnement benachrichtigt.
 //!
 //! - `abo-loeschen`: Löscht das angegebene Abonnement.
-//! 
-use crate::{
-    email::SmtpConfig, 
-    models::MountPoint, 
-    db::GpgPublicKeyPair,
-};
+//!
+use crate::{db::GpgPublicKeyPair, email::SmtpConfig, models::MountPoint};
 use actix_web::{web::JsonConfig, App, HttpServer};
-use serde_derive::{Serialize, Deserialize};
 use clap::Parser;
+use serde_derive::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 pub mod api;
+pub mod cli;
 pub mod db;
-pub mod models;
-pub mod pgp;
 pub mod email;
 pub mod index;
-pub mod pdf;
-pub mod suche;
 pub mod k8s;
-pub mod cli;
+pub mod models;
+pub mod pdf;
+pub mod pgp;
+pub mod suche;
 
-#[derive(Debug, Clone)] 
+#[derive(Debug, Clone)]
 pub struct AppState {
     pub data: Arc<Mutex<AppStateData>>,
 }
 
 impl AppState {
     pub fn host_name(&self) -> String {
-        self.data.lock().ok().map(|l| l.host_name.clone()).unwrap_or_default()
+        self.data
+            .lock()
+            .ok()
+            .map(|l| l.host_name.clone())
+            .unwrap_or_default()
     }
     pub fn sync_server(&self) -> bool {
-        self.data.lock().ok().map(|l| l.sync_server).unwrap_or(false)
+        self.data
+            .lock()
+            .ok()
+            .map(|l| l.sync_server)
+            .unwrap_or(false)
     }
     pub fn k8s_aktiv(&self) -> bool {
         self.data.lock().ok().map(|l| l.k8s_aktiv).unwrap_or(false)
     }
     pub fn smtp_config(&self) -> SmtpConfig {
-        self.data.lock().ok().map(|l| l.smtp_config.clone()).unwrap_or_default()
+        self.data
+            .lock()
+            .ok()
+            .map(|l| l.smtp_config.clone())
+            .unwrap_or_default()
     }
 }
 
 /// Server-interne Konfiguration, geladen beim Server-Start
-#[derive(Debug, Clone, PartialEq)] 
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppStateData {
-    /// Name des Servers ohne "https://", notwendig für E-Mails, 
+    /// Name des Servers ohne "https://", notwendig für E-Mails,
     /// z.B. "grundbuch-test.eu"
     pub host_name: String,
-    /// Ob dieser Server im Sync-Modus läuft (und daher 
+    /// Ob dieser Server im Sync-Modus läuft (und daher
     /// Schreibrechte auf /mnt/data/files hat) oder nur Lesezugriff
     pub sync_server: bool,
     /// Ob der Server im Kubernetes-Cluster läuft
@@ -126,6 +134,8 @@ pub enum ArgAction {
     Indexiere,
     /// Suche nach Suchbegriff in momentan vorhandenem Index
     Suche { begriff: String },
+    /// Neuen GPG-Schluessel generieren (--name, --email, --dir)
+    SchluesselNeu(SchluesselNeuArgs),
     /// Neuen Benutzer anlegen (--name, --email, --passwort, --rechte)
     BenutzerNeu(BenutzerNeuArgsCli),
     /// Benutzer löschen (--email)
@@ -140,6 +150,20 @@ pub enum ArgAction {
     AboNeu(AboNeuArgs),
     /// Abonnement löschen (--email, --aktenzeichen)
     AboLoeschen(AboLoeschenArgs),
+}
+
+#[derive(clap::Parser, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[clap(author, version, about, long_about = None)]
+pub struct SchluesselNeuArgs {
+    /// Name des neuen Benutzers
+    #[clap(short, long)]
+    pub name: String,
+    /// E-Mail des neuen Benutzers
+    #[clap(short, long)]
+    pub email: String,
+    /// Ausgabeverzeichnis (default: /keys/[email.public.gpg.json] + /keys/[email.private.gpg])
+    #[clap(short, long)]
+    pub dir: Option<PathBuf>,
 }
 
 #[derive(clap::Parser, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -159,7 +183,7 @@ pub struct BenutzerNeuArgsCli {
 
     /// Rechte (Typ) des neuen Benutzers
     #[clap(short, long, default_value = "gast")]
-    pub rechte: String, 
+    pub rechte: String,
     /// Öffentlicher Schlüssel (public key)
     pub schluessel: Option<PathBuf>,
 }
@@ -171,7 +195,7 @@ impl BenutzerNeuArgsCli {
                 let file_contents = std::fs::read_to_string(s)?;
                 let parsed = serde_json::from_str(&file_contents)?;
                 Some(parsed)
-            },
+            }
             None => None,
         };
 
@@ -194,7 +218,7 @@ pub struct BenutzerNeuArgsJson {
     /// Passwort des neuen Benutzers
     pub passwort: String,
     /// Rechte (Typ) des neuen Benutzers
-    pub rechte: String, 
+    pub rechte: String,
     /// Öffentlicher Schlüssel (public key)
     pub schluessel: Option<GpgPublicKeyPair>,
 }
@@ -245,8 +269,8 @@ pub struct AboNeuArgs {
     /// Typ des Abonnements ("email" oder "webhook")
     #[clap(short, long)]
     pub typ: String,
-    
-    /// Name des Amtsgerichts / Gemarkung / Blatts des neuen Abos, 
+
+    /// Name des Amtsgerichts / Gemarkung / Blatts des neuen Abos,
     /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254")
     #[clap(short, long)]
     pub blatt: String,
@@ -266,8 +290,8 @@ pub struct AboLoeschenArgs {
     /// Typ des Abonnements ("email" oder "webhook")
     #[clap(short, long)]
     pub typ: String,
-    
-    /// Name des Amtsgerichts / Gemarkung / Blatts des Abos, 
+
+    /// Name des Amtsgerichts / Gemarkung / Blatts des Abos,
     /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254 ")
     #[clap(short, long)]
     pub blatt: String,
@@ -288,146 +312,164 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
             let _ = init_logger()?;
 
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
 
-            runtime
-            .block_on(async move {
+            runtime.block_on(async move {
                 let app_state = load_app_state().await;
                 let _ = init(&app_state).await?;
                 if !app_state.sync_server() {
-                    startup_http_server(&ip, app_state).await
-                    .map_err(|e| format!("{e}"))
+                    startup_http_server(&ip, app_state)
+                        .await
+                        .map_err(|e| format!("{e}"))
                 } else {
-                    startup_sync_server(&ip, app_state).await
-                    .map_err(|e| format!("{e}"))
+                    startup_sync_server(&ip, app_state)
+                        .await
+                        .map_err(|e| format!("{e}"))
                 }
             })
-        },
+        }
         Indexiere => crate::index::index_all(),
         Suche { begriff } => {
             let suchergebnisse = crate::suche::suche_in_index(&begriff)?;
             println!("{:#?}", suchergebnisse);
             Ok(())
-        },
+        }
+        SchluesselNeu(a) => crate::cli::schluessel_neu(a).map_err(|e| format!("{e}")),
         BenutzerNeu(a) => {
-            
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
 
-            runtime.block_on(async move { crate::cli::create_user_cli(a).await.map_err(|e| format!("{e}")) })
-        },
+            runtime.block_on(async move {
+                crate::cli::create_user_cli(a)
+                    .await
+                    .map_err(|e| format!("{e}"))
+            })
+        }
         BenutzerLoeschen(a) => {
-            
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
-            
-            runtime.block_on(async move { crate::cli::delete_user_cli(a).await.map_err(|e| format!("{e}")) })
-        },
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
+
+            runtime.block_on(async move {
+                crate::cli::delete_user_cli(a)
+                    .await
+                    .map_err(|e| format!("{e}"))
+            })
+        }
         BezirkNeu(a) => {
-
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
 
-            runtime.block_on(async move { crate::cli::create_bezirk_cli(a).await.map_err(|e| format!("{e}")) })
-        },
+            runtime.block_on(async move {
+                crate::cli::create_bezirk_cli(a)
+                    .await
+                    .map_err(|e| format!("{e}"))
+            })
+        }
         BezirkLoeschen(a) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
 
-            runtime.block_on(async move { crate::cli::delete_bezirk_cli(a).await.map_err(|e| format!("{e}")) })
-        },
+            runtime.block_on(async move {
+                crate::cli::delete_bezirk_cli(a)
+                    .await
+                    .map_err(|e| format!("{e}"))
+            })
+        }
         AboNeu(a) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
 
-            runtime.block_on(async move { crate::cli::create_abo_cli(a).await.map_err(|e| format!("{e}")) })
-        },
+            runtime.block_on(async move {
+                crate::cli::create_abo_cli(a)
+                    .await
+                    .map_err(|e| format!("{e}"))
+            })
+        }
         AboLoeschen(a) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("tokio: {e}"))?;
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
 
-            runtime.block_on(async move { crate::cli::delete_abo_cli(a).await.map_err(|e| format!("{e}")) })
-        },
+            runtime.block_on(async move {
+                crate::cli::delete_abo_cli(a)
+                    .await
+                    .map_err(|e| format!("{e}"))
+            })
+        }
     }
 }
 
 async fn init(app_state: &AppState) -> Result<(), String> {
-    
-    use crate::models::{
-        get_index_dir, 
-        get_data_dir, 
-        get_db_path
-    };
+    use crate::models::{get_data_dir, get_db_path, get_index_dir};
 
     let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Local));
     let _ = std::fs::create_dir_all(get_index_dir());
 
     if app_state.k8s_aktiv() && !app_state.sync_server() {
+        let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Remote));
 
-        let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Remote));  
-        
         if Path::new(&get_db_path(MountPoint::Remote)).exists() {
-            std::fs::copy(get_db_path(MountPoint::Remote), get_db_path(MountPoint::Local))
-            .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;  
+            std::fs::copy(
+                get_db_path(MountPoint::Remote),
+                get_db_path(MountPoint::Local),
+            )
+            .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
         } else {
             crate::db::create_database(MountPoint::Remote)
-            .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;  
+                .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
         }
 
         let data_remote = get_data_dir(MountPoint::Remote);
         let data_local = get_data_dir(MountPoint::Local);
 
-        let _ = git2::Repository::clone(&data_remote, &data_local)
-        .map_err(|e| format!("Fehler in clone_repository({data_remote:?}, {data_local:?}): {e}"))?;
-    
+        let _ = git2::Repository::clone(&data_remote, &data_local).map_err(|e| {
+            format!("Fehler in clone_repository({data_remote:?}, {data_local:?}): {e}")
+        })?;
     } else if !Path::new(&get_db_path(MountPoint::Local)).exists() {
         crate::db::create_database(MountPoint::Local)
-        .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;  
+            .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
     }
 
     Ok(())
 }
 
 async fn load_app_state() -> AppState {
-
-    let state = AppState { 
+    let state = AppState {
         data: Arc::new(Mutex::new(AppStateData {
-            host_name: std::env::var("HOST_NAME").unwrap_or("127.0.0.1".to_string()), 
+            host_name: std::env::var("HOST_NAME").unwrap_or("127.0.0.1".to_string()),
             sync_server: std::env::var("SYNC_MODE") == Ok("1".to_string()),
             remote_mount: std::env::var("REMOTE_MOUNT").unwrap_or("/mnt/data/files".to_string()),
             k8s_aktiv: crate::k8s::is_running_in_k8s().await,
-            smtp_config: SmtpConfig { 
-                smtp_adresse: std::env::var("SMTP_HOST").unwrap_or_default(), 
-                email: std::env::var("SMTP_EMAIL").unwrap_or_default(), 
-                passwort: std::env::var("SMTP_PASSWORT").unwrap_or_default(), 
+            smtp_config: SmtpConfig {
+                smtp_adresse: std::env::var("SMTP_HOST").unwrap_or_default(),
+                email: std::env::var("SMTP_EMAIL").unwrap_or_default(),
+                passwort: std::env::var("SMTP_PASSWORT").unwrap_or_default(),
             },
-        }))
+        })),
     };
 
     let _ = std::env::remove_var("SMTP_HOST");
     let _ = std::env::remove_var("SMTP_EMAIL");
     let _ = std::env::remove_var("SMTP_PASSWORT");
-    
+
     state
 }
 
-async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {    
+async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
     HttpServer::new(move || {
-
         let json_cfg = JsonConfig::default()
             .limit(usize::MAX)
             .content_type_required(false);
@@ -446,11 +488,10 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
 
 // Server-Start, extra Funktion für Unit-Tests
 async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
-
     let json_cfg = || {
         JsonConfig::default()
-        .limit(usize::MAX)
-        .content_type_required(false)
+            .limit(usize::MAX)
+            .content_type_required(false)
     };
 
     let app_state_clone = app_state.clone();
@@ -476,10 +517,10 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
                 .service(crate::api::upload::upload)
                 .service(crate::api::abo::abo_neu)
                 .service(crate::api::abo::abo_loeschen)
-            })
-            .bind((ip, 8080))?
-            .run()
-            .await
+        })
+        .bind((ip, 8080))?
+        .run()
+        .await
     };
 
     let app_state_clone = app_state.clone();
@@ -490,10 +531,10 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
             let app_state_clone = app_state_clone.clone();
 
             App::new()
-            .app_data(json_cfg())
-            .app_data(actix_web::web::Data::new(app_state_clone))
-            .wrap(actix_web::middleware::Compress::default())
-            .service(crate::api::pull::pull)
+                .app_data(json_cfg())
+                .app_data(actix_web::web::Data::new(app_state_clone))
+                .wrap(actix_web::middleware::Compress::default())
+                .service(crate::api::pull::pull)
         })
         .bind((ip, 8081))?
         .run()
@@ -507,20 +548,19 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
 }
 
 fn init_logger() -> Result<(), String> {
-
-    use slog::{Drain, o};
+    use slog::{o, Drain};
 
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::CompactFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let _ = slog::Logger::root(
-        drain, 
+        drain,
         o!(
-            "format" => "pretty", 
+            "format" => "pretty",
             "version" => env!("CARGO_PKG_VERSION")
-        )
+        ),
     );
-    
+
     Ok(())
 }
 

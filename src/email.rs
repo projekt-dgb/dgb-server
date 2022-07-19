@@ -1,13 +1,13 @@
 use crate::models::AbonnementInfo;
 use lettre::{
     message::{header, MultiPart, SinglePart},
-    SmtpTransport, Message, Transport,
+    Message, SmtpTransport, Transport,
 };
-use serde_derive::{Serialize, Deserialize};
+use serde_derive::{Deserialize, Serialize};
 
 // Um die E-Mails zu verschicken, brauchen wir Zugriff
 // zu einem Server. Die Daten werden beim Start des Servers
-// angefordert. 
+// angefordert.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SmtpConfig {
     // = "smtp.example.com"
@@ -29,12 +29,16 @@ pub struct AboWebhookInfo {
     pub aenderungs_id: String,
 }
 
-pub fn send_change_email(config: &SmtpConfig, server_url: &str, abo: &AbonnementInfo, commit_id: &str) -> Result<(), String> {
-    
-    use lettre::transport::smtp::PoolConfig;
+pub fn send_change_email(
+    config: &SmtpConfig,
+    server_url: &str,
+    abo: &AbonnementInfo,
+    commit_id: &str,
+) -> Result<(), String> {
     use lettre::transport::smtp::authentication::Credentials;
     use lettre::transport::smtp::authentication::Mechanism;
-    
+    use lettre::transport::smtp::PoolConfig;
+
     let AbonnementInfo {
         amtsgericht,
         blatt,
@@ -42,14 +46,14 @@ pub fn send_change_email(config: &SmtpConfig, server_url: &str, abo: &Abonnement
         grundbuchbezirk,
         aktenzeichen,
     } = abo;
-    
+
     let aktenzeichen = aktenzeichen.clone().unwrap_or_default(); // TODO
     let email = text;
     let email_url = urlencoding::encode(text);
     let amtsgericht_url = urlencoding::encode(amtsgericht);
     let grundbuchbezirk_url = urlencoding::encode(grundbuchbezirk);
     let aktenzeichen_url = urlencoding::encode(&aktenzeichen);
-    
+
     let html = format!("<!DOCTYPE html>
     <html lang=\"de\">SmtpClient
     <head>
@@ -85,7 +89,7 @@ pub fn send_change_email(config: &SmtpConfig, server_url: &str, abo: &Abonnement
         </div>
     </body>send_change_email
     </html>");
-    
+
     let plaintext = format!("Guten Tag,
 
 in den folgenden Grundbuchblättern sind Änderungen vorgenommen worden:
@@ -103,27 +107,35 @@ Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.
 Um das Abonnement zu kündigen, klicken Sie bitte hier:
 {server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}
     ");
-        
+
     let amtsgericht_url_lower = amtsgericht_url.to_lowercase();
-    
+
     let email = Message::builder()
-    .from(format!("Amtsgericht {amtsgericht} <ag-{amtsgericht_url_lower}@grundbuchaenderung.de>").parse().map_err(|e| format!("Ungültige Sender-E-Mail: {e}"))?)
-    .to(email.parse().map_err(|e| format!("Ungültige Empfänger-E-Mail: {e}"))?)
-    .subject(&format!("Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})"))
-    .multipart(
-        MultiPart::alternative() // This is composed of two parts.
-            .singlepart(
-                SinglePart::builder()
-                    .header(header::ContentType::TEXT_PLAIN)
-                    .body(plaintext),
-            )
-            .singlepart(
-                SinglePart::builder()
-                    .header(header::ContentType::TEXT_HTML)
-                    .body(String::from(html)),
-            ),
-    )
-    .map_err(|e| format!("failed to build email"))?;
+        .from(
+            format!("Amtsgericht {amtsgericht} <ag-{amtsgericht_url_lower}@grundbuchaenderung.de>")
+                .parse()
+                .map_err(|e| format!("Ungültige Sender-E-Mail: {e}"))?,
+        )
+        .to(email
+            .parse()
+            .map_err(|e| format!("Ungültige Empfänger-E-Mail: {e}"))?)
+        .subject(&format!(
+            "Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})"
+        ))
+        .multipart(
+            MultiPart::alternative() // This is composed of two parts.
+                .singlepart(
+                    SinglePart::builder()
+                        .header(header::ContentType::TEXT_PLAIN)
+                        .body(plaintext),
+                )
+                .singlepart(
+                    SinglePart::builder()
+                        .header(header::ContentType::TEXT_HTML)
+                        .body(String::from(html)),
+                ),
+        )
+        .map_err(|e| format!("failed to build email"))?;
 
     let mailer = SmtpTransport::starttls_relay(&config.smtp_adresse)
         .map_err(|e| format!("{e}"))?
@@ -134,17 +146,20 @@ Um das Abonnement zu kündigen, klicken Sie bitte hier:
         .authentication(vec![Mechanism::Plain])
         .pool_config(PoolConfig::new().max_size(20))
         .build();
-    
+
     // Store the message when you're ready.
     mailer
-    .send(&email)
-    .map_err(|e| format!("failed to deliver message: {e}"))?;
-    
+        .send(&email)
+        .map_err(|e| format!("failed to deliver message: {e}"))?;
+
     Ok(())
 }
 
-pub async fn send_change_webhook(server_url: &str, abo: &AbonnementInfo, commit_id: &str) -> Result<(), String> {
-    
+pub async fn send_change_webhook(
+    server_url: &str,
+    abo: &AbonnementInfo,
+    commit_id: &str,
+) -> Result<(), String> {
     let abo_info = AboWebhookInfo {
         server_url: server_url.to_string(),
         amtsgericht: abo.amtsgericht.clone(),
@@ -156,6 +171,11 @@ pub async fn send_change_webhook(server_url: &str, abo: &AbonnementInfo, commit_
     };
 
     let client = reqwest::Client::new();
-    let _ = client.post(&abo.text).json(&abo_info).send().await.map_err(|e| format!("{e}"))?;
+    let _ = client
+        .post(&abo.text)
+        .json(&abo_info)
+        .send()
+        .await
+        .map_err(|e| format!("{e}"))?;
     Ok(())
 }
