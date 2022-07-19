@@ -183,11 +183,20 @@ pub mod login {
         use crate::api::commit::DbChangeOp;
 
         match crate::db::check_password(MountPoint::Local, &email, &passwort) {
+            // Benutzer + Token existiert
             Ok((_info, token, valid_until)) => LoginResponse::Ok(LoginResponseOk {
                 token,
                 valid_until, 
             }),
-            Err(e) => {
+            // Benutzer existiert nicht
+            Err(Some(e)) => {
+                LoginResponse::Error(LoginResponseError {
+                    code: 0,
+                    text: e.clone(),
+                })
+            },
+            // Benutzer existiert, aber noch kein Token
+            Err(None) => {
 
                 let (token, gueltig_bis) = crate::db::generate_token();
                 
@@ -213,7 +222,7 @@ pub mod login {
                     Err(e) => {
                         LoginResponse::Error(LoginResponseError {
                             code: 0,
-                            text: e.clone(),
+                            text: e.unwrap_or_default().clone(),
                         })
                     }
                 }

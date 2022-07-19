@@ -61,9 +61,9 @@ features = ["bundled"]
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
 panic = "abort"
-codegen-units = 1
+codegen-units = 16
 debug = false
 debug-assertions = false
 overflow-checks = false

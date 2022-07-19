@@ -450,14 +450,14 @@ pub fn check_password(
     mount_point: MountPoint, 
     email: &str, 
     passwort: &str,
-) -> Result<(BenutzerInfo, String, DateTime<Utc>), String> {
+) -> Result<(BenutzerInfo, String, DateTime<Utc>), Option<String>> {
     
     let conn = Connection::open(get_db_path(mount_point))
-        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+        .map_err(|e| Some(format!("Fehler bei Verbindung zur Benutzerdatenbank")))?;
 
     let mut stmt = conn
         .prepare("SELECT id, name, email, rechte, password_hashed FROM benutzer WHERE email = ?1")
-        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten")))?;
     
     let benutzer = stmt
         .query_map(rusqlite::params![email], |row| {
@@ -469,16 +469,16 @@ pub fn check_password(
                 row.get::<usize, Vec<u8>>(4)?,
             ))
         })
-        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .map_err(|e| Some(format!("Fehler bei Verbindung zur Benutzerdatenbank")))?
         .collect::<Vec<_>>();
 
     let (id, name, email, rechte, pw) = match benutzer.get(0) {
         Some(Ok(s)) => s,
-        _ => { return Err(format!("Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden")); },
+        _ => { return Err(Some(format!("Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden"))); },
     };
 
     if !verify_password(&pw, &passwort) {
-        return Err(format!("Ungültiges Passwort"));
+        return Err(Some(format!("Ungültiges Passwort")));
     }
 
     let info = BenutzerInfo {
@@ -490,7 +490,7 @@ pub fn check_password(
 
     let mut stmt = conn
         .prepare("SELECT token, gueltig_bis FROM sessions WHERE id = ?1")
-        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten")))?;
     
     let tokens = stmt
         .query_map(rusqlite::params![info.id], |row| {
@@ -504,7 +504,7 @@ pub fn check_password(
 
     match tokens.get(0).and_then(|t| t.as_ref().ok().and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)))) {
         Some((token, gueltig_bis)) => Ok((info, token.clone(), gueltig_bis.into())),
-        None => Err(format!("Kein gültiges Token für Benutzer / Passwort gefunden")),
+        None => Err(None),
     }
 }
 
