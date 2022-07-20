@@ -89,7 +89,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sessions (
-                benutzer        INTEGER PRIMARY KEY AUTOINCREMENT,
+                benutzer        INTEGER PRIMARY KEY,
                 token           VARCHAR(1024) UNIQUE NOT NULL,
                 gueltig_bis     VARCHAR(255) NOT NULL
         )",
@@ -385,12 +385,12 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
-        .prepare("SELECT id, gueltig_bis FROM sessions WHERE token = ?1")
+        .prepare("SELECT benutzer, gueltig_bis FROM sessions WHERE token = ?1")
         .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
 
-    let tokens = stmt
+        let tokens = stmt
         .query_map(rusqlite::params![token], |row| {
-            Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(2)?))
+            Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(1)?))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
         .collect::<Vec<_>>();
@@ -421,9 +421,9 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
     let benutzer = stmt
         .query_map(rusqlite::params![id], |row| {
             Ok((
+                row.get::<usize, String>(0)?,
                 row.get::<usize, String>(1)?,
                 row.get::<usize, String>(2)?,
-                row.get::<usize, String>(3)?,
             ))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
@@ -511,14 +511,24 @@ pub fn check_password(
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
         .collect::<Vec<_>>();
 
-    match tokens.get(0).and_then(|t| {
-        t.as_ref()
-            .ok()
-            .and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)))
-    }) {
-        Some((token, gueltig_bis)) => Ok((info, token.clone(), gueltig_bis.into())),
-        None => Err(None),
+    let now = Utc::now();
+
+    for t in tokens {
+        
+        let t = t.as_ref().ok()
+        .and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)));
+        
+        let (token, gueltig_bis) = match t {
+            Some((t, g)) => (t, g),
+            None => continue,
+        };
+        
+        if !(now > gueltig_bis) {
+            return Ok((info, token.clone(), gueltig_bis.into()));
+        }
     }
+
+    Err(None)
 }
 
 pub fn insert_token_into_sessions(

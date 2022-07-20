@@ -28,12 +28,19 @@ async fn get_benutzer_from_httpauth_inner(
     use actix_web::FromRequest;
     use actix_web_httpauth::extractors::bearer::BearerAuth;
 
-    let bearer = BearerAuth::extract(req).await.map_err(|e| format!("{e}"))?;
+    let token = match BearerAuth::extract(req).await {
+        Ok(o) => o.token().to_string(),
+        Err(e) => {
+            let cookie = req
+            .cookie("Authentication")
+            .ok_or(format!("Konnte Authentifizierungs-Token nicht aus Bearer auslesen"))?;
+            cookie.value().to_string()
+        }
+    };
 
-    let token = bearer.token();
-    let user = crate::db::get_user_from_token(token)?;
+    let user = crate::db::get_user_from_token(&token)?;
 
-    Ok((token.to_string(), user))
+    Ok((token, user))
 }
 
 pub(crate) async fn write_to_root_db(
@@ -179,8 +186,11 @@ pub mod login {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
     pub enum LoginResponse {
+        #[serde(rename = "ok")]
         Ok(LoginResponseOk),
+        #[serde(rename = "error")]
         Error(LoginResponseError),
     }
 
@@ -346,6 +356,7 @@ pub mod commit {
     use std::path::Path;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
     pub enum CommitResponse {
         #[serde(rename = "ok")]
         StatusOk(CommitResponseOk),
@@ -598,6 +609,7 @@ pub mod pull {
     use std::path::Path;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
     pub enum PullResponse {
         #[serde(rename = "ok")]
         StatusOk(PullResponseOk),
@@ -1498,6 +1510,7 @@ pub mod abo {
     use serde_derive::{Deserialize, Serialize};
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
     enum AboNeuAnfrage {
         #[serde(rename = "ok")]
         Ok(AboNeuAnfrageOk),

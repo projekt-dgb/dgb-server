@@ -440,7 +440,7 @@ async fn init(app_state: &AppState) -> Result<(), String> {
         let _ = git2::Repository::clone(&data_remote, &data_local).map_err(|e| {
             format!("Fehler in clone_repository({data_remote:?}, {data_local:?}): {e}")
         })?;
-    } else if !Path::new(&get_db_path(MountPoint::Local)).exists() {
+    } else {
         crate::db::create_database(MountPoint::Local)
             .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
     }

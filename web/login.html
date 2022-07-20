@@ -18,7 +18,7 @@
         
         <h1>Anmelden</h1>
         
-        <form method="post" action="/login">
+        <form id="formdata" onsubmit="onLoginSubmit(event)" method="post">
             <div>
             <label for="email">E-Mail</label><br/>
             <input id='email' autofocus='true' name='email' type="email" />
@@ -30,5 +30,34 @@
             <br/>
             <button type="submit"><p>Anmelden</p></button>
         </form>
+        <script>
+
+        function onLoginSubmit(event) {
+
+            event.preventDefault();
+            var email = document.getElementById("email").value;
+            var passwort = document.getElementById("passwort").value;
+
+            var http = new XMLHttpRequest();
+            http.open('POST', '/login', true);
+            http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+            http.onreadystatechange = function() {
+                if (http.readyState == 4 && http.status == 200) {
+                    document.getElementById("formdata").reset();
+                    var object = JSON.parse(http.responseText);
+                    console.log(object);
+                    if (object.status == "ok") {
+                        document.cookie = "Authentication=" + (object.token || "") + "; path=/";
+                        window.location.href = '/konto';
+                    } else if (object.status == "error") {
+                        console.error("" + object.code + ": " + object.text);
+                    }
+                }
+            }
+            http.send('email=' + email + '&passwort=' + passwort);
+            return false;
+        }
+
+        </script>
     </body>
 </html>

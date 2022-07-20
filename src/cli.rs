@@ -27,15 +27,11 @@ pub fn schluessel_neu(args: &SchluesselNeuArgs) -> Result<(), anyhow::Error> {
         crate::db::create_gpg_key(&args.name, &args.email)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!("d1: {:?}", std::env::current_dir().ok()
-    .and_then(|d| Some(d.canonicalize().ok()?.join("keys"))));
-
     let out_dir = args.dir.clone().unwrap_or(
         std::env::current_dir().ok()
         .and_then(|d| Some(d.canonicalize().ok()?.join("keys")))
         .unwrap_or_default()
     );
-    println!("dir: {}", out_dir.display());
     let _ = std::fs::create_dir_all(&out_dir);
 
     let private_key_out_file = out_dir.join(&format!("{}.private.gpg", args.email));
