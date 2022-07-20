@@ -184,7 +184,9 @@ pub struct BenutzerNeuArgsCli {
     /// Rechte (Typ) des neuen Benutzers
     #[clap(short, long, default_value = "gast")]
     pub rechte: String,
+
     /// Öffentlicher Schlüssel (public key)
+    #[clap(short, long)]
     pub schluessel: Option<PathBuf>,
 }
 
