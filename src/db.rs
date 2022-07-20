@@ -501,7 +501,7 @@ pub fn check_password(
     };
 
     let mut stmt = conn
-        .prepare("SELECT token, gueltig_bis FROM sessions WHERE id = ?1")
+        .prepare("SELECT token, gueltig_bis FROM sessions WHERE benutzer = ?1")
         .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten")))?;
 
     let tokens = stmt
@@ -557,7 +557,7 @@ pub fn insert_token_into_sessions(
     };
 
     conn.execute(
-        "INSERT INTO sessions (id, token, gueltig_bis) VALUES (?1, ?2, ?3)",
+        "INSERT INTO sessions (benutzer, token, gueltig_bis) VALUES (?1, ?2, ?3)",
         rusqlite::params![id, token, gueltig_bis.to_rfc3339()],
     )
     .map_err(|e| format!("Fehler beim Einfügen von Token in Sessions: {e}"))?;

@@ -4,7 +4,6 @@ use crate::{
     AboLoeschenArgs, AboNeuArgs, BenutzerLoeschenArgs, BenutzerNeuArgsCli, BezirkLoeschenArgs,
     BezirkNeuArgs, SchluesselNeuArgs,
 };
-use std::path::Path;
 
 pub async fn create_bezirk_cli(args: &BezirkNeuArgs) -> Result<(), anyhow::Error> {
     let app_state = crate::load_app_state().await;
