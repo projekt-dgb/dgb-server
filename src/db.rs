@@ -53,12 +53,12 @@ pub async fn pull_db() -> Result<(), PullResponseError> {
         })?;
 
     for peer in k8s_peers.iter() {
-        if peer.name != "dgb-server" {
+        if !peer.name.starts_with("dgb-server") {
             continue;
         }
         let client = reqwest::Client::new();
         let res = client
-            .post(&format!("http://{}:8081/pull", peer.ip))
+            .post(&format!("http://{}:8081/pull-db", peer.ip))
             .send()
             .await;
 

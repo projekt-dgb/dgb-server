@@ -433,7 +433,7 @@ pub mod commit {
             .map_err(|_| response_err(500, "Kubernetes aktiv, konnte aber Pods nicht lesen (keine ClusterRole-Berechtigung?)".to_string()))?;
 
             for peer in k8s_peers.iter() {
-                if peer.name != "dgb-server" {
+                if !peer.name.starts_with("dgb-server") {
                     continue;
                 }
                 let client = reqwest::Client::new();
@@ -545,6 +545,7 @@ pub mod commit {
     ) -> Result<(), String> {
 
         let mount_point_write = if app_state.k8s_aktiv() && app_state.sync_server() {
+            println!("dgb-sync: /db: {:#?}", change_op);
             MountPoint::Remote
         } else {
             MountPoint::Local

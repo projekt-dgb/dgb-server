@@ -61,7 +61,7 @@ pub async fn get_sync_server_ip() -> Result<String, String> {
     k8s_get_peer_ips().await
     .map_err(|e| format!("{e}"))?
     .iter()
-    .find(|i| i.name == "dgb-sync")
+    .find(|i| i.name.starts_with("dgb-sync"))
     .map(|i| i.ip.clone())
     .ok_or(format!("no pod with name \"dgb-sync\" found"))
 }

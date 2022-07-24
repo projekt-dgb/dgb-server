@@ -432,28 +432,34 @@ async fn init(app_state: &AppState) -> Result<(), String> {
         }
 
         let sync_server_ip = crate::k8s::get_sync_server_ip().await?;
-        let database_bytes = crate::db::get_db_bytes().await?;
-        
+        println!("ok dgb-sync = {sync_server_ip}");
 
+        let database_bytes = crate::db::get_db_bytes().await?;
         let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Local));
         let _ = std::fs::create_dir_all(get_index_dir());
 
+        println!("dgb-server: Datenbank erstellt");
         std::fs::write(get_db_path(MountPoint::Local), database_bytes)
         .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
 
         let data_local = get_data_dir(MountPoint::Local);
         let data_remote = format!("http://{sync_server_ip}:9418/");
 
+        println!("dgb-server git clone {data_remote:?} {data_local:?}");
         let _ = git2::Repository::clone(&data_remote, &data_local).map_err(|e| {
             format!("Fehler in clone_repository({data_remote:?}, {data_local:?}): {e}")
         })?;
+        println!("dgb-server: ok, git clone erfolgreich");
     } else if app_state.k8s_aktiv() && app_state.sync_server() {
         
+        println!("dgb-sync: erstelle Datenbank in {:?}", get_db_path(MountPoint::Remote));
         crate::db::create_database(MountPoint::Remote)
         .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
         
-        let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Remote));
         let data_dir = get_data_dir(MountPoint::Remote);
+        println!("dgb-sync: erstelle /data dir in {data_dir:?}");
+        let _ = std::fs::create_dir_all(&data_dir);
+        println!("dgb-sync: initialisiere repo in {data_dir:?}");
         match Repository::open(&data_dir) {
             Ok(o) => o,
             Err(_) => {
@@ -483,6 +489,8 @@ async fn load_app_state() -> AppState {
 
 async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
     
+    println!("dgb-sync: starte git daemon --base-path={}", get_data_dir(MountPoint::Remote));
+
     std::thread::spawn(move || {
         let _ = std::process::Command::new("git")
         .arg("daemon")
@@ -492,6 +500,8 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
         .output()
         .expect("could not spawm git daemon");
     });
+
+    println!("dgb-sync: starte sync server (port 8081, endpoint = /commit, /db, /get-db /ping)");
 
     HttpServer::new(move || {
         let json_cfg = JsonConfig::default()
@@ -520,6 +530,7 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
             .content_type_required(false)
     };
 
+    println!("dgb-server: starte http server");
     let app_state_clone = app_state.clone();
     let a = async move {
         let app_state_clone = app_state_clone.clone();
