@@ -132,6 +132,10 @@ pub enum ArgAction {
     },
     /// Starte die Indexierung der Grundbuchblätter als neuen Prozess
     Indexiere,
+    /// Datenbank von Sync-Server lesen
+    SyncDb,
+    /// Git-Repository von Sync-Server lesen
+    Sync,
     /// Suche nach Suchbegriff in momentan vorhandenem Index
     Suche { begriff: String },
     /// Neuen GPG-Schluessel generieren (--name, --email, --dir)
@@ -333,6 +337,36 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
             })
         }
         Indexiere => crate::index::index_all(),
+        SyncDb => {
+            let _ = init_logger()?;
+
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
+           
+            runtime.block_on(async move {
+                let app_state = load_app_state().await;
+                let _ = init(&app_state).await?;
+                crate::cli::pull_db_cli().await?;
+                Ok(())
+            })
+        },
+        Sync => {
+            let _ = init_logger()?;
+
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("tokio: {e}"))?;
+           
+            runtime.block_on(async move {
+                let app_state = load_app_state().await;
+                let _ = init(&app_state).await?;
+                crate::cli::pull().await?;
+                Ok(())
+            })
+        },
         Suche { begriff } => {
             let suchergebnisse = crate::suche::suche_in_index(&begriff)?;
             println!("{:#?}", suchergebnisse);

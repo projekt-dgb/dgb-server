@@ -5,6 +5,113 @@ use crate::{
     BezirkNeuArgs, SchluesselNeuArgs,
 };
 
+
+pub async fn pull_db_cli() -> Result<(), String> {
+
+    use crate::api::pull::PullResponse;
+
+    let k8s = crate::k8s::is_running_in_k8s().await;
+    if !k8s {
+        println!("Kubernetes nicht aktiv, pull beendet.");
+        return Ok(());
+    }
+
+    let k8s_peers = crate::k8s::k8s_get_peer_ips().await
+    .map_err(|e| format!("Konnte k8s-peers nicht auslesen: {e}"))?;
+    
+    let client = reqwest::Client::new();
+
+    for peer in k8s_peers.iter() {
+        if !peer.name.starts_with("dgb-server") {
+            println!("überspringe: {} (ip {})", peer.name, peer.ip);
+            continue;
+        }
+
+        let res = client
+        .post(&format!("http://{}:8081/pull-db", peer.ip))
+        .send()
+        .await;
+
+        let json = match res {
+            Ok(o) => o.json::<PullResponse>().await,
+            Err(e) => {
+                println!("Pod {} (IP: {}): konnte JSON-Antwort von /pull-db nicht lesen: {e}", peer.name, peer.ip);
+                continue;
+            }
+        };
+
+        match json {
+            Ok(PullResponse::StatusOk(_)) => {
+                println!("Pod {} (IP {}): ok, Datenbank synchronisiert", peer.name, peer.ip);
+            }
+            Ok(PullResponse::StatusError(e)) => {
+                println!("Pod {} (IP {}): Fehler: {}", peer.name, peer.ip, e.text);
+            },
+            Err(e) => {
+                println!("Pod {} (IP {}): Interner Fehler: {e}", peer.name, peer.ip);
+            }
+        }
+    }
+
+    println!("Ok! Datenbank wurde synchronisiert!");
+    
+    Ok(())
+}
+
+pub async fn pull() -> Result<(), String> {
+
+    use git2::Repository;
+    use std::path::Path;
+    use crate::{get_data_dir, MountPoint};
+
+    let k8s = crate::k8s::is_running_in_k8s().await;
+    if !k8s {
+        println!("Kubernetes nicht aktiv, pull beendet.");
+        return Ok(());
+    }
+
+    let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
+    if !local_path.exists() {
+        let _ = std::fs::create_dir(local_path.clone());
+    }
+
+    let repo = match Repository::open(&local_path) {
+        Ok(o) => o,
+        Err(_) => {
+            Repository::init(&local_path)
+            .map_err(|e| format!("{e}"))?
+        }
+    };
+
+    let sync_server_ip = crate::k8s::get_sync_server_ip().await
+    .map_err(|e| format!("Konnte Sync-Server nicht finden: {e}"))?;
+    
+    let data_remote = format!("git://{sync_server_ip}:9418/");
+    println!("git clone {data_remote}");
+    repo.remote_add_fetch("origin", &data_remote)
+        .map_err(|e| format!("git_clone({data_remote}): {e}"))?;
+    
+    let mut remote = repo.find_remote("origin")
+        .map_err(|e| format!("git_clone({data_remote}): {e}"))?;
+
+    remote
+        .fetch(&["main"], None, None)
+        .map_err(|e| format!("git_clone({data_remote}): {e}"))?;
+
+    let last_commit = repo
+        .head()
+        .ok()
+        .and_then(|c| c.target())
+        .and_then(|head_target| repo.find_commit(head_target).ok());
+
+    let commit_id = last_commit.as_ref().map(|l| format!("{}", l.id())).unwrap_or("<leer>".to_string());
+    let last_commit_msg = last_commit.as_ref().and_then(|l| l.message()).unwrap_or("");
+
+    println!("Ok, git synchronisiert mit root! Letzter Commit: {commit_id}");
+    println!("{last_commit_msg}");
+    Ok(())
+}
+
 pub async fn create_bezirk_cli(args: &BezirkNeuArgs) -> Result<(), anyhow::Error> {
     let app_state = crate::load_app_state().await;
     crate::api::write_to_root_db(DbChangeOp::BezirkNeu(args.clone()), &app_state)
