@@ -29,10 +29,10 @@ pub async fn get_db_bytes() -> Result<Vec<u8>, String> {
     }
 
     let bytes = res.bytes().await
-        .map_err(|e| format!("Konnte Datenbank nicht synchronisieren: {e}"))?;
+    .map_err(|e| format!("Konnte Datenbank nicht synchronisieren: {e}"))?;
     
-        let bytes = decompress_size_prepended(&bytes)
-        .map_err(|e| format!("Fehler beim Dekomprimieren: {e}"))?;
+    let bytes = decompress_size_prepended(&bytes)
+    .map_err(|e| format!("Fehler beim Dekomprimieren: {e}"))?;
 
     Ok(bytes)
 }

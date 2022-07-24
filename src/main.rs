@@ -346,8 +346,6 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
                 .map_err(|e| format!("tokio: {e}"))?;
            
             runtime.block_on(async move {
-                let app_state = load_app_state().await;
-                let _ = init(&app_state).await?;
                 crate::cli::pull_db_cli().await?;
                 Ok(())
             })
@@ -361,8 +359,6 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
                 .map_err(|e| format!("tokio: {e}"))?;
            
             runtime.block_on(async move {
-                let app_state = load_app_state().await;
-                let _ = init(&app_state).await?;
                 crate::cli::pull().await?;
                 Ok(())
             })
@@ -562,7 +558,6 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
         App::new()
             .app_data(json_cfg)
             .app_data(actix_web::web::Data::new(app_state.clone()))
-            .wrap(actix_web::middleware::Compress::default())
             .service(crate::api::commit::commit)
             .service(crate::api::commit::db)
             .service(crate::api::commit::get_db)
@@ -617,13 +612,14 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
 
         HttpServer::new(move || {
             let app_state_clone = app_state_clone.clone();
-
+            
             App::new()
                 .app_data(json_cfg())
                 .app_data(actix_web::web::Data::new(app_state_clone))
                 .wrap(actix_web::middleware::Compress::default())
                 .service(crate::api::pull::pull)
-        })
+                .service(crate::api::pull::pull_db)
+            })
         .bind((ip, 8081))?
         .run()
         .await

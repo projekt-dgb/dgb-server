@@ -545,7 +545,6 @@ pub mod commit {
     ) -> Result<(), String> {
 
         let mount_point_write = if app_state.k8s_aktiv() && app_state.sync_server() {
-            println!("dgb-sync: /db: {:#?}", change_op);
             MountPoint::Remote
         } else {
             MountPoint::Local
@@ -661,7 +660,7 @@ pub mod pull {
     }
 
     #[post("/pull")]
-    async fn pull(_: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
+    pub async fn pull(_: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
         match pull_internal(&app_state).await {
             Ok(o) => o,
             Err(e) => e,
@@ -720,8 +719,9 @@ pub mod pull {
     }
 
     #[post("/pull-db")]
-    async fn pull_db(_: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
-        match pull_db_internal(&app_state).await {
+    pub async fn pull_db(_: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
+        let result = pull_db_internal(&app_state).await;
+        match result {
             Ok(o) => o,
             Err(e) => e,
         }
@@ -729,14 +729,18 @@ pub mod pull {
 
     async fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
         let response_ok = || {
-            HttpResponse::Ok().content_type("application/json").body(
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(
                 serde_json::to_string(&PullResponse::StatusOk(PullResponseOk {}))
                     .unwrap_or_default(),
             )
         };
 
         let response_err = |code: usize, text: String| {
-            HttpResponse::Ok().content_type("application/json").body(
+            HttpResponse::Ok()
+            .content_type("application/json")
+            .body(
                 serde_json::to_string(&PullResponse::StatusError(PullResponseError { code, text }))
                     .unwrap_or_default(),
             )
@@ -747,7 +751,7 @@ pub mod pull {
         }
 
         let remote_db_bytes = crate::db::get_db_bytes().await
-        .map_err(|e| response_err(500, e))?;
+        .map_err(|e| response_err(500, format!("get_db_bytes: {e}")))?;
 
         let local_path = Path::new(&get_db_path(MountPoint::Local)).to_path_buf();
         if let Some(parent) = local_path.parent() {

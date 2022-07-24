@@ -32,8 +32,18 @@ pub async fn pull_db_cli() -> Result<(), String> {
         .send()
         .await;
 
-        let json = match res {
-            Ok(o) => o.json::<PullResponse>().await,
+        let (json, bytes) = match res {
+            Ok(o) => {
+                let bytes = match o.bytes().await {
+                    Ok(o) => (&*o).to_vec(),
+                    Err(e) => {
+                        println!("Pod {} (IP: {}): keine Bytes von /pull-db: {e}", peer.name, peer.ip);
+                        continue;
+                    }
+                };
+                let json = serde_json::from_slice::<PullResponse>(&*bytes);
+                (json, bytes.to_vec())
+            },
             Err(e) => {
                 println!("Pod {} (IP: {}): konnte JSON-Antwort von /pull-db nicht lesen: {e}", peer.name, peer.ip);
                 continue;
@@ -48,7 +58,8 @@ pub async fn pull_db_cli() -> Result<(), String> {
                 println!("Pod {} (IP {}): Fehler: {}", peer.name, peer.ip, e.text);
             },
             Err(e) => {
-                println!("Pod {} (IP {}): Interner Fehler: {e}", peer.name, peer.ip);
+                let bytes = String::from_utf8_lossy(&bytes);
+                println!("Pod {} (IP {}): Interner Fehler: {e}: {bytes}", peer.name, peer.ip);
             }
         }
     }
