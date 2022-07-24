@@ -8,7 +8,8 @@ RUN apt-get update && apt install -y gcc make build-essential && rm -rf /var/lib
 RUN cargo build --release
 
 FROM debian:bullseye-slim
-RUN apt-get update && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt install -y git && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /dgb-server/target/release/dgb-server /usr/local/bin/dgb-server
 EXPOSE 8080
+EXPOSE 9418
 CMD dgb-server start --ip 0.0.0.0

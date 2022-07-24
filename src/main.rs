@@ -48,8 +48,8 @@
 use crate::{db::GpgPublicKeyPair, email::SmtpConfig, models::MountPoint};
 use actix_web::{web::JsonConfig, App, HttpServer};
 use clap::Parser;
+use models::get_data_dir;
 use serde_derive::{Deserialize, Serialize};
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -415,31 +415,52 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
 }
 
 async fn init(app_state: &AppState) -> Result<(), String> {
-    use crate::models::{get_data_dir, get_db_path, get_index_dir};
-
-    let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Local));
-    let _ = std::fs::create_dir_all(get_index_dir());
+    use crate::models::{get_db_path, get_index_dir};
+    use git2::Repository;
 
     if app_state.k8s_aktiv() && !app_state.sync_server() {
-        let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Remote));
-
-        if Path::new(&get_db_path(MountPoint::Remote)).exists() {
-            std::fs::copy(
-                get_db_path(MountPoint::Remote),
-                get_db_path(MountPoint::Local),
-            )
-            .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
-        } else {
-            crate::db::create_database(MountPoint::Remote)
-                .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
+    
+        // Warte bis sync-server online ist
+        let mut timeout = 0;
+        while timeout < 120 {
+            timeout += 1;
+            if crate::k8s::get_sync_server_ip().await.is_ok() {
+                break;
+            }
+            println!("Warte auf dgb-sync server... ({timeout} / 120 seconds)");
+            std::thread::sleep(std::time::Duration::from_secs(1));
         }
 
-        let data_remote = get_data_dir(MountPoint::Remote);
+        let sync_server_ip = crate::k8s::get_sync_server_ip().await?;
+        let database_bytes = crate::db::get_db_bytes().await?;
+        
+
+        let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Local));
+        let _ = std::fs::create_dir_all(get_index_dir());
+
+        std::fs::write(get_db_path(MountPoint::Local), database_bytes)
+        .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
+
         let data_local = get_data_dir(MountPoint::Local);
+        let data_remote = format!("http://{sync_server_ip}:9418/");
 
         let _ = git2::Repository::clone(&data_remote, &data_local).map_err(|e| {
             format!("Fehler in clone_repository({data_remote:?}, {data_local:?}): {e}")
         })?;
+    } else if app_state.k8s_aktiv() && app_state.sync_server() {
+        
+        crate::db::create_database(MountPoint::Remote)
+        .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
+        
+        let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Remote));
+        let data_dir = get_data_dir(MountPoint::Remote);
+        match Repository::open(&data_dir) {
+            Ok(o) => o,
+            Err(_) => {
+                Repository::init(&data_dir)
+                .map_err(|e| format!("{e}"))?
+            }
+        };
     } else {
         crate::db::create_database(MountPoint::Local)
             .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
@@ -449,28 +470,29 @@ async fn init(app_state: &AppState) -> Result<(), String> {
 }
 
 async fn load_app_state() -> AppState {
-    let state = AppState {
+    AppState {
         data: Arc::new(Mutex::new(AppStateData {
             host_name: std::env::var("HOST_NAME").unwrap_or("127.0.0.1".to_string()),
             sync_server: std::env::var("SYNC_MODE") == Ok("1".to_string()),
             remote_mount: std::env::var("REMOTE_MOUNT").unwrap_or("/mnt/data/files".to_string()),
             k8s_aktiv: crate::k8s::is_running_in_k8s().await,
-            smtp_config: SmtpConfig {
-                smtp_adresse: std::env::var("SMTP_HOST").unwrap_or_default(),
-                email: std::env::var("SMTP_EMAIL").unwrap_or_default(),
-                passwort: std::env::var("SMTP_PASSWORT").unwrap_or_default(),
-            },
-        })),
-    };
-
-    let _ = std::env::remove_var("SMTP_HOST");
-    let _ = std::env::remove_var("SMTP_EMAIL");
-    let _ = std::env::remove_var("SMTP_PASSWORT");
-
-    state
+            smtp_config: SmtpConfig::default(),
+        }))
+    }
 }
 
 async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
+    
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("git")
+        .arg("daemon")
+        .arg("--reuseaddr")
+        .arg(&format!("--base-path={}", get_data_dir(MountPoint::Remote)))
+        .arg(&get_data_dir(MountPoint::Remote))
+        .output()
+        .expect("could not spawm git daemon");
+    });
+
     HttpServer::new(move || {
         let json_cfg = JsonConfig::default()
             .limit(usize::MAX)
@@ -482,6 +504,8 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
             .wrap(actix_web::middleware::Compress::default())
             .service(crate::api::commit::commit)
             .service(crate::api::commit::db)
+            .service(crate::api::commit::get_db)
+            .service(crate::api::commit::ping)
     })
     .bind((ip, 8081))?
     .run()

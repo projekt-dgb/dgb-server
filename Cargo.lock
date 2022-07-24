@@ -994,6 +994,7 @@ dependencies = [
  "lazy_static",
  "lettre",
  "log",
+ "lz4_flex",
  "printpdf",
  "regex",
  "reqwest",

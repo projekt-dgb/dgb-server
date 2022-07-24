@@ -46,15 +46,9 @@ Zugriff auf die Cloudflare-API zum Erstellen der `__acme-challenge` DNS-Einträg
 siehe https://link.medium.com/aQ4vqJ5Fjrb. Hierbei muss im 
 Cloudflare-Konto ein API-Schlüssel.
 
-Wenn man sich mit diesem Einmal-Passwort anmeldet, können Benutzerkonten 
-verwaltet / angelegt / archiviert werden, ansonsten nicht. Konten werden
-nie gelöscht, da ansonsten der PublicKey verloren geht, welcher zum 
-Verifizieren der Grundbucheinträge benötigt wird.
-
 ```
 # CLOUDFLARE_API_TOKEN = token
 # DOCKER_CONFIG_JSON = base64(.dockerconfigjson)
-# root-access.* = ausfüllen
 cp ./k8s/secret.template.yml ./k8s/secret.yml
 kubectl apply -f ./k8s/secrets.yml
 # "test-grundbuch.eu" -> "meine.website"

@@ -9,9 +9,33 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use lz4_flex::decompress_size_prepended;
 
 pub type GemarkungsBezirke = Vec<(String, String, String)>;
 const PASSWORD_LEN: usize = 128;
+
+pub async fn get_db_bytes() -> Result<Vec<u8>, String> {
+
+    let ip = crate::k8s::get_sync_server_ip().await?;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(&format!("http://{ip}:8081/get-db"))
+        .send()
+        .await
+        .map_err(|e| format!("Konnte Sync-Server nicht erreichen: {e}"))?;
+    
+    if res.status() != reqwest::StatusCode::OK {
+        return Err(format!("Konnte Datenbank nicht von Sync-Server erhalten: 404"));
+    }
+
+    let bytes = res.bytes().await
+        .map_err(|e| format!("Konnte Datenbank nicht synchronisieren: {e}"))?;
+    
+        let bytes = decompress_size_prepended(&bytes)
+        .map_err(|e| format!("Fehler beim Dekomprimieren: {e}"))?;
+
+    Ok(bytes)
+}
 
 pub async fn pull_db() -> Result<(), PullResponseError> {
     let k8s = crate::k8s::is_running_in_k8s().await;
@@ -29,6 +53,9 @@ pub async fn pull_db() -> Result<(), PullResponseError> {
         })?;
 
     for peer in k8s_peers.iter() {
+        if peer.name != "dgb-server" {
+            continue;
+        }
         let client = reqwest::Client::new();
         let res = client
             .post(&format!("http://{}:8081/pull", peer.ip))

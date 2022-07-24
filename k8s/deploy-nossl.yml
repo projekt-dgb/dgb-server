@@ -1,9 +1,47 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dgb-server
+  name: dgb-sync
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: dgb-sync
+  template:
+    metadata:
+      labels:
+        app: dgb-sync
+    spec:
+      containers:
+        - name: sync-server
+          image: grundbuch/dgb-server:latest
+          imagePullPolicy: Always
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+          - containerPort: 8081
+          - containerPort: 9418
+          volumeMounts:
+            - mountPath: "/mnt/data/files"
+              name: persistent-volume
+          env: 
+            - name: SYNC_MODE
+              value: "1"
+      volumes:
+        - name: persistent-volume
+          persistentVolumeClaim:
+            claimName: persistent-volume
+      imagePullSecrets:
+        - name: registrypullsecret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dgb-server
+spec:
+  replicas: 2
   selector:
     matchLabels:
       app: dgb-server
@@ -22,54 +60,6 @@ spec:
               cpu: "500m"
           ports:
           - containerPort: 8080
-          volumeMounts:
-            - mountPath: "/mnt/data/files"
-              name: persistent-volume
-          env: 
-            - name: ROOT_EMAIL
-              valueFrom: 
-                secretKeyRef: 
-                  name: root-access 
-                  key: email 
-            - name: ROOT_PASSWORT 
-              valueFrom: 
-                secretKeyRef: 
-                  name: root-access 
-                  key: passwort 
-            - name: SMTP_HOST 
-              valueFrom: 
-                secretKeyRef: 
-                  name: root-access 
-                  key: smtp-host 
-            - name: SMTP_EMAIL
-              valueFrom: 
-                secretKeyRef: 
-                  name: root-access 
-                  key: smtp-email
-            - name: SMTP_PASSWORT
-              valueFrom: 
-                secretKeyRef: 
-                  name: root-access 
-                  key: smtp-passwort  
-        - name: synchronizer
-          image: grundbuch/dgb-server:latest
-          imagePullPolicy: Always
-          resources:
-            limits:
-              memory: "128Mi"
-              cpu: "500m"
-          ports:
-          - containerPort: 8081
-          volumeMounts:
-            - mountPath: "/mnt/data/files"
-              name: persistent-volume
-          env: 
-            - name: SYNC_MODE
-              value: "1"
-      volumes:
-        - name: persistent-volume
-          persistentVolumeClaim:
-            claimName: persistent-volume
       imagePullSecrets:
         - name: registrypullsecret
 ---

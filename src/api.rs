@@ -62,31 +62,29 @@ pub(crate) async fn write_to_root_db(
         return result;
     };
 
-    let k8s_peers = crate::k8s::k8s_get_peer_ips()
+    let k8s_sync_server_ip = crate::k8s::get_sync_server_ip()
         .await
-        .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
+        .map_err(|e| format!("Fehler beim Senden an /db: Kein Sync-Server: {e}"))?;
 
     let mut result = BTreeMap::new();
 
-    for peer in k8s_peers {
-        let client = reqwest::Client::new();
-        let res = client
-            .post(&format!("http://{}:8081/db", peer.ip))
-            .body(serde_json::to_string(&change).unwrap_or_default())
-            .send()
-            .await
-            .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(&format!("http://{k8s_sync_server_ip}:8081/db"))
+        .body(serde_json::to_string(&change).unwrap_or_default())
+        .send()
+        .await
+        .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
 
-        let o = res
-            .json::<CommitResponse>()
-            .await
-            .map_err(|e| format!("Konnte Änderung nicht an Peer {} senden: {e}", peer.ip))?;
+    let o = res
+        .json::<CommitResponse>()
+        .await
+        .map_err(|e| format!("Konnte Änderung nicht an Sync-Server {k8s_sync_server_ip} senden: {e}"))?;
 
-        match o {
-            CommitResponse::StatusOk(CommitResponseOk {}) => {}
-            CommitResponse::StatusError(e) => {
-                result.insert(format!("{}", peer.ip), e);
-            }
+    match o {
+        CommitResponse::StatusOk(CommitResponseOk {}) => {}
+        CommitResponse::StatusError(e) => {
+            result.insert(format!("{}",k8s_sync_server_ip), e);
         }
     }
 
@@ -115,7 +113,7 @@ pub mod index {
 
     // Startseite
     #[get("/")]
-    async fn status(req: HttpRequest) -> impl Responder {
+    async fn status(_: HttpRequest) -> impl Responder {
         let css = include_str!("../web/style.css");
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
@@ -170,7 +168,7 @@ pub mod login {
 
     // Login-Seite
     #[get("/login")]
-    async fn login_get(req: HttpRequest) -> impl Responder {
+    async fn login_get(_: HttpRequest) -> impl Responder {
         let css = include_str!("../web/style.css");
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
@@ -211,7 +209,7 @@ pub mod login {
     async fn login_post(
         app_state: web::Data<AppState>,
         form: web::Form<LoginForm>,
-        req: HttpRequest,
+        _: HttpRequest,
     ) -> impl Responder {
         let response = login_json(&form.email, &form.passwort, &*app_state).await;
         HttpResponse::Ok()
@@ -345,7 +343,7 @@ pub mod commit {
         pull::PullResponse,
         upload::{commit_changes, sync_changes_to_disk, verify_signature, UploadChangeset},
     };
-    use crate::models::{get_data_dir, MountPoint};
+    use crate::models::{get_data_dir, MountPoint, get_db_path};
     use crate::{
         AboLoeschenArgs, AboNeuArgs, AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson,
         BezirkLoeschenArgs, BezirkNeuArgs,
@@ -354,6 +352,11 @@ pub mod commit {
     use chrono::{DateTime, Utc};
     use serde_derive::{Deserialize, Serialize};
     use std::path::Path;
+
+    #[post("/ping")]
+    async fn ping(_: HttpRequest) -> impl Responder {
+        HttpResponse::Ok().body("")
+    }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(tag = "status")]
@@ -417,7 +420,7 @@ pub mod commit {
             )
         })?;
 
-        if app_state.k8s_aktiv() {
+        if app_state.k8s_aktiv() && app_state.sync_server() {
             let remote_path = Path::new(&get_data_dir(MountPoint::Remote)).to_path_buf();
             sync_changes_to_disk(&upload_changeset, &remote_path)?;
             commit_changes(&app_state, &remote_path, &benutzer, &upload_changeset)
@@ -430,6 +433,9 @@ pub mod commit {
             .map_err(|_| response_err(500, "Kubernetes aktiv, konnte aber Pods nicht lesen (keine ClusterRole-Berechtigung?)".to_string()))?;
 
             for peer in k8s_peers.iter() {
+                if peer.name != "dgb-server" {
+                    continue;
+                }
                 let client = reqwest::Client::new();
                 let res = client
                     .post(&format!("http://{}:8081/pull", peer.ip))
@@ -495,11 +501,37 @@ pub mod commit {
         },
     }
 
+    #[post("/get-db")]
+    async fn get_db(
+        app_state: web::Data<AppState>,
+        _: HttpRequest,
+    ) -> HttpResponse {
+        use lz4_flex::compress_prepend_size;
+
+        if app_state.k8s_aktiv() && app_state.sync_server() {
+            let db_bytes = match std::fs::read(get_db_path(MountPoint::Remote)) {
+                Ok(o) => o,
+                Err(_) => return HttpResponse::NotFound().finish(),
+            };
+            let compressed = compress_prepend_size(&db_bytes);
+            HttpResponse::Ok()
+            .body(compressed)
+        } else {
+            let db_bytes = match std::fs::read(get_db_path(MountPoint::Local)) {
+                Ok(o) => o,
+                Err(_) => return HttpResponse::NotFound().finish(),
+            };
+            let compressed = compress_prepend_size(&db_bytes);
+            HttpResponse::Ok()
+            .body(compressed)
+        }
+    }
+
     #[post("/db")]
     async fn db(
         upload_changeset: web::Json<DbChangeOp>,
         app_state: web::Data<AppState>,
-        req: HttpRequest,
+        _: HttpRequest,
     ) -> impl Responder {
         match db_change_internal(&upload_changeset, &app_state) {
             Ok(o) => o,
@@ -511,7 +543,8 @@ pub mod commit {
         change_op: &DbChangeOp,
         app_state: &AppState,
     ) -> Result<(), String> {
-        let mount_point_write = if app_state.k8s_aktiv() {
+
+        let mount_point_write = if app_state.k8s_aktiv() && app_state.sync_server() {
             MountPoint::Remote
         } else {
             MountPoint::Local
@@ -627,14 +660,14 @@ pub mod pull {
     }
 
     #[post("/pull")]
-    async fn pull(req: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
-        match pull_internal(&app_state) {
+    async fn pull(_: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
+        match pull_internal(&app_state).await {
             Ok(o) => o,
             Err(e) => e,
         }
     }
 
-    fn pull_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
+    async fn pull_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
         use git2::Repository;
 
         let response_ok = || {
@@ -663,36 +696,37 @@ pub mod pull {
         let repo = match Repository::open(&local_path) {
             Ok(o) => o,
             Err(_) => {
-                Repository::init(&local_path).map_err(|e| response_err(501, format!("{e}")))?
+                Repository::init(&local_path)
+                .map_err(|e| response_err(501, format!("{e}")))?
             }
         };
 
-        let mut remote = match repo.find_remote("origin") {
-            Ok(o) => o,
-            Err(e) => {
-                repo.remote_add_fetch("origin", &get_data_dir(MountPoint::Remote))
-                    .map_err(|e| response_err(501, format!("{e}")))?;
-                repo.find_remote("origin")
-                    .map_err(|e| response_err(501, format!("{e}")))?
-            }
-        };
+        let sync_server_ip = crate::k8s::get_sync_server_ip().await
+        .map_err(|e| response_err(501, format!("Konnte Sync-Server nicht finden: {e}")))?;
+        
+        let data_remote = format!("http://{sync_server_ip}:9418/");
+        repo.remote_add_fetch("origin", &data_remote)
+            .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
+
+        let mut remote = repo.find_remote("origin")
+        .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
 
         remote
             .fetch(&["main"], None, None)
-            .map_err(|e| response_err(501, format!("{e}")))?;
+            .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
 
         Ok(response_ok())
     }
 
     #[post("/pull-db")]
-    async fn pull_db(req: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
-        match pull_db_internal(&app_state) {
+    async fn pull_db(_: HttpRequest, app_state: web::Data<AppState>) -> impl Responder {
+        match pull_db_internal(&app_state).await {
             Ok(o) => o,
             Err(e) => e,
         }
     }
 
-    fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
+    async fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
         let response_ok = || {
             HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string(&PullResponse::StatusOk(PullResponseOk {}))
@@ -711,20 +745,15 @@ pub mod pull {
             return Ok(response_ok());
         }
 
-        let remote_path = Path::new(&get_db_path(MountPoint::Remote)).to_path_buf();
-        if !remote_path.exists() {
-            return Err(response_err(
-                404,
-                "Remote: Benutzerdatenbank existiert nicht".to_string(),
-            ));
-        }
+        let remote_db_bytes = crate::db::get_db_bytes().await
+        .map_err(|e| response_err(500, e))?;
 
         let local_path = Path::new(&get_db_path(MountPoint::Local)).to_path_buf();
         if let Some(parent) = local_path.parent() {
             let _ = std::fs::create_dir(parent);
         }
 
-        let _ = std::fs::copy(&remote_path, &local_path).map_err(|e| {
+        let _ = std::fs::write(&local_path, &remote_db_bytes).map_err(|e| {
             response_err(
                 500,
                 format!("Remote: Fehler beim Kopieren der Benutzerdatenbank vom PV zum Pod: {e}"),
@@ -844,32 +873,25 @@ pub mod upload {
             )
         })?;
 
-        if app_state.k8s_aktiv() {
-            let k8s_peers = crate::k8s::k8s_get_peer_ips().await
+        if app_state.k8s_aktiv() && !app_state.sync_server() {
+            let k8s_sync_server_ip = crate::k8s::get_sync_server_ip().await
             .map_err(|e| response_err(500, "Kubernetes aktiv, konnte Pods aber nicht lesen (keine ClusterRole-Berechtigung?)".to_string()))?;
 
-            for peer in k8s_peers.iter() {
-                let client = reqwest::Client::new();
-                let res = client
-                    .post(&format!("http://{}:8081/commit", peer.ip))
-                    .body(serde_json::to_string(&upload_changeset).unwrap_or_default())
-                    .bearer_auth(token.clone())
-                    .send()
-                    .await;
+            let client = reqwest::Client::new();
+            let res = client
+                .post(&format!("http://{k8s_sync_server_ip}:8081/commit"))
+                .body(serde_json::to_string(&upload_changeset).unwrap_or_default())
+                .bearer_auth(token.clone())
+                .send()
+                .await;
 
-                let json = match res {
-                    Ok(o) => o,
-                    Err(e) => {
-                        continue;
-                    }
-                };
+            let json = res.map_err(|e| response_err(500, format!("{e}")))?;
 
-                if let Some(cr) = json.json::<CommitResponse>().await.ok() {
-                    match cr {
-                        CommitResponse::StatusOk(_) => return Ok(response_ok()),
-                        CommitResponse::StatusError(e) => {
-                            return Err(response_err(e.code, e.text));
-                        }
+            if let Some(cr) = json.json::<CommitResponse>().await.ok() {
+                match cr {
+                    CommitResponse::StatusOk(_) => return Ok(response_ok()),
+                    CommitResponse::StatusError(e) => {
+                        return Err(response_err(e.code, e.text));
                     }
                 }
             }
