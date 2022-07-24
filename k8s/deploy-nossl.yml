@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: dgb-sync
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: dgb-sync
@@ -41,7 +41,7 @@ kind: Deployment
 metadata:
   name: dgb-server
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: dgb-server

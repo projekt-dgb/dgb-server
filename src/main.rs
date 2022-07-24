@@ -443,7 +443,7 @@ async fn init(app_state: &AppState) -> Result<(), String> {
         .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
 
         let data_local = get_data_dir(MountPoint::Local);
-        let data_remote = format!("http://{sync_server_ip}:9418/");
+        let data_remote = format!("git://{sync_server_ip}:9418/");
 
         println!("dgb-server git clone {data_remote:?} {data_local:?}");
         let _ = git2::Repository::clone(&data_remote, &data_local).map_err(|e| {
@@ -501,7 +501,14 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
         .expect("could not spawm git daemon");
     });
 
-    println!("dgb-sync: starte sync server (port 8081, endpoint = /commit, /db, /get-db /ping)");
+    let k8s_peers = crate::k8s::k8s_get_peer_ips().await.unwrap_or_default();
+    println!("\r\nNAME\tIP");
+    println!("-------------------------------");
+    for p in k8s_peers {
+        println!("{}\t{}", p.name, p.ip);
+    }
+
+    println!("\r\ndgb-sync: starte sync server (port 8081, endpoint = /commit, /db, /get-db /ping)");
 
     HttpServer::new(move || {
         let json_cfg = JsonConfig::default()

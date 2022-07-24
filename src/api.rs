@@ -705,7 +705,7 @@ pub mod pull {
         let sync_server_ip = crate::k8s::get_sync_server_ip().await
         .map_err(|e| response_err(501, format!("Konnte Sync-Server nicht finden: {e}")))?;
         
-        let data_remote = format!("http://{sync_server_ip}:9418/");
+        let data_remote = format!("git://{sync_server_ip}:9418/");
         repo.remote_add_fetch("origin", &data_remote)
             .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
 
