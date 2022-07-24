@@ -41,7 +41,7 @@ kind: Deployment
 metadata:
   name: dgb-server
 spec:
-  replicas: 0
+  replicas: 2
   selector:
     matchLabels:
       app: dgb-server

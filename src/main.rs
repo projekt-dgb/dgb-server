@@ -489,9 +489,19 @@ async fn load_app_state() -> AppState {
 
 async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
     
+    use std::path::Path;
+
     println!("dgb-sync: starte git daemon --base-path={}", get_data_dir(MountPoint::Remote));
 
     std::thread::spawn(move || {
+
+        let git_daemon_ok_file = Path::new(&get_data_dir(MountPoint::Remote))
+            .join(".git")
+            .join("git-daemon-export-ok");
+    
+        let _ = std::fs::write(&git_daemon_ok_file, &[])
+        .expect("could not create git-daemon-export-ok file");
+
         let _ = std::process::Command::new("git")
         .arg("daemon")
         .arg("--reuseaddr")
