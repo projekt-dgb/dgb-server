@@ -109,8 +109,9 @@ pub(crate) async fn write_to_root_db(
 
 /// HTML für `/` und `/api` Seite
 pub mod index {
-    use actix_web::{get, HttpRequest, HttpResponse, Responder};
-
+    use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
+    use serde_derive::{Serialize, Deserialize};
+    
     // Startseite
     #[get("/")]
     async fn status(_: HttpRequest) -> impl Responder {
@@ -119,6 +120,48 @@ pub mod index {
         HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
             .body(include_str!("../web/index.html").replace("<!-- CSS -->", &css))
+    }
+
+    // Zugriff anfragen
+    #[get("/zugriff")]
+    async fn zugriff(_: HttpRequest) -> impl Responder {
+        let css = include_str!("../web/style.css");
+        let css = format!("<style type='text/css'>{css}</style>");
+        HttpResponse::Ok()
+            .content_type("text/html; charset=utf-8")
+            .body(include_str!("../web/zugriff.html").replace("<!-- CSS -->", &css))
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonPost {
+        // name: String,
+        // email: String,
+        // blaetter: { land, amtsgericht, blatt }
+        // typ: String,
+        // grund: Vec<String>
+    }
+
+    // Login-Seite
+    #[post("/zugriff")]
+    async fn zugriff_post(json: web::Json<ZugriffJsonPost>, req: HttpRequest) -> impl Responder {
+        HttpResponse::Ok()
+        .content_type("application/json")
+        .body("{}")
+    }
+
+    #[get("/konto.js")]
+    async fn konto_js(_: HttpRequest) -> impl Responder {
+        
+        let path = std::path::Path::new(
+            env!("CARGO_MANIFEST_DIR")
+        ).join("web").join("konto.js");
+        
+        let s = std::fs::read_to_string(path)
+        .unwrap_or_default();
+
+        HttpResponse::Ok()
+        .content_type("text/javascript")
+        .body(s)
     }
 
     // Seite mit API-Dokumentation

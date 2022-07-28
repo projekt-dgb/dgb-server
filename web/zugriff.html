@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>dgb - Digitales Grundbuch</title>
+        <!-- CSS -->
+    </head>
+    <body>
+        <nav>
+            <ul>
+                <li>
+                    <a href="/"><span>Startseite</span></a>
+                    <a href="/api"><span>API</span></a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="deco-rect"></div>
+        
+        <h1>Zugriff beantragen</h1>
+        
+        <form id="formdata" onsubmit="onLoginSubmit(event)" method="post">
+            <div>
+                <label for="name">Name</label><br/>
+                <input id='name' autofocus='true' name='name' type="text" />
+            </div>
+            <div>
+                <label for="email">E-Mail</label><br/>
+                <input id='email' name='email' type="email" />
+            </div>
+            <div>
+                <label>Ich benötige Zugriff auf die Blätter</label><br/>
+                <div class="zugriff-blatt">
+                    <select name="zugriff_blatt[bundesland]">
+                        <option selected="selected" value="ALLE_BUNDESLAENDER">alle Bundesländer</option>
+                        <option value="BWB">Baden Württemberg</option>
+                        <option value="BYN">Bayern</option>
+                        <option value="BLN">Berlin</option>
+                        <option value="BRA">Brandenburg</option>
+                        <option value="BRE">Bremen</option>
+                        <option value="HAM">Hamburg</option>
+                        <option value="HES">Hessen</option>
+                        <option value="MPV">Mecklenburg-Vorpommern</option>
+                        <option value="NSA">Niedersachsen</option>
+                        <option value="NRW">Nordrhein Westfalen</option>
+                        <option value="RLP">Rheinland-Pfalz</option>
+                        <option value="SRL">Saarland</option>
+                        <option value="SAC">Sachsen</option>
+                        <option value="SAA">Sachsen-Anhalt</option>
+                        <option value="SLH">Schleswig-Holstein</option>
+                        <option value="THU">Thüringen</option>
+                    </select>
+                    <select name="zugriff_blatt[amtsgericht]">
+                        <option selected="selected" value="ALLE_AMTSGERICHTE">alle Amtsgerichte</option>
+                    </select>
+                    <select name="zugriff_blatt[grundbuchbezirk]">
+                        <option selected="selected" value="ALLE_GRUNDBUCHBEZIRKE">alle Grundbuchbezirke</option>
+                    </select>
+                </div>
+                <button>Blatt hinzufügen</button>
+            </div>
+
+            <div>
+                <label for="typ">Ich benötige Einsicht in die obigen Grundbuchblätter als:</label><br/>
+                <select name="typ">
+                    <option selected="selected" value="GAST">Inhaber des Blatts</option>
+                    <option value="M-OD">Mitarbeiter ÖD (Lesezugriff)</option>
+                    <option value="B-OD">Bearbeiter ÖD (Lese + Schreibzugriff)</option>
+                    <option value="SONSTIGE">Sonstiger Berechtigter (Grund angeben)</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="typ">Grund:</label><br/>
+                <textarea cols="50" rows = "8"></textarea>
+            </div>
+
+            <br/>
+            <button type="submit"><p>Zugriff anfragen</p></button>
+        </form>
+        <script>
+
+        function onLoginSubmit(event) {
+
+            event.preventDefault();
+            
+            var name = document.getElementById("name").value;
+            var email = document.getElementById("email").value;
+            // zugriff_blatt[bundesland]
+
+            var http = new XMLHttpRequest();
+            http.open('POST', '/zugriff', true);
+            http.setRequestHeader('Content-type', 'application/json');
+            http.onreadystatechange = function() {
+                if (http.readyState == 4 && http.status == 200) {
+                    document.getElementById("formdata").reset();
+                    var object = JSON.parse(http.responseText);
+                    console.log(object);
+                    if (object.status == "ok") {
+                        document.cookie = "Authentication=" + (object.token || "") + "; path=/";
+                        window.location.href = '/konto';
+                    } else if (object.status == "error") {
+                        console.error("" + object.code + ": " + object.text);
+                    }
+                }
+            }
+            http.send(JSON.stringify({
+
+            }));
+            return false;
+        }
+
+        </script>
+    </body>
+</html>
