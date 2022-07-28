@@ -2,10 +2,11 @@
 
 use crate::{
     api::pull::{PullResponse, PullResponseError},
-    models::{get_db_path, AbonnementInfo, BenutzerInfo},
+    models::{get_db_path, AbonnementInfo, BenutzerInfo, get_data_dir},
     MountPoint,
 };
 use chrono::{DateTime, Utc};
+use git2::Repository;
 use rusqlite::{Connection, OpenFlags};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -102,6 +103,21 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
     open_flags.set(OpenFlags::SQLITE_OPEN_READ_WRITE, true);
 
     let conn = Connection::open_with_flags(get_db_path(mount_point), open_flags)?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS zugriff_anfragen (
+                id              STRING PRIMARY KEY UNIQUE NOT NULL,
+                name            VARCHAR(255) NOT NULL,
+                email           VARCHAR(255) NOT NULL,
+                typ             VARCHAR(50) NOT NULL,
+                grund           STRING,
+                blaetter        STRING NOT NULL,
+                gewaehrt_von    STRING,
+                abgelehnt_von   STRING,
+                am              STRING
+        )",
+        [],
+    )?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS benutzer (
@@ -367,7 +383,7 @@ pub fn get_key_for_fingerprint(
 
     let mut stmt = conn
         .prepare("SELECT pubkey FROM publickeys WHERE email = ?1 AND fingerprint = ?2")
-        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 10"))?;
 
     let pubkeys = stmt
         .query_map(rusqlite::params![email, fingerprint], |row| {
@@ -390,37 +406,458 @@ pub fn get_key_for_fingerprint(
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct KontoData {
-    pub data: BTreeMap<String, Vec<String>>,
+    pub kontotyp: String,
+    pub ausgewaehlt: Option<String>,
+    pub data: BTreeMap<String, KontoTabelle>,
 }
 
-pub fn get_konto_data(benutzer: &BenutzerInfo) -> Result<KontoData, String> {
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct KontoTabelle {
+    pub spalten: Vec<String>,
+    pub daten: BTreeMap<String, Vec<String>>,
+}
+
+pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String> {
+    
     let mut data = KontoData::default();
+    data.kontotyp = benutzer_info.rechte.clone();
+
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    match benutzer.rechte.as_str() {
-        "admin" => {}
-        "bearbeiter" => {}
+    match benutzer_info.rechte.as_str() {
+        "admin" => {
+
+            // Zugriffe 
+            let mut stmt = conn
+            .prepare("
+                SELECT 
+                    id,
+                    name,
+                    email,
+                    typ,
+                    grund,
+                    blaetter,
+                    gewaehrt_von,
+                    abgelehnt_von,
+                    am
+                FROM zugriff_anfragen 
+            ")
+            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 1"))?;
+
+            let zugriffe = stmt
+            .query_map(rusqlite::params![], |row| {
+                Ok((
+                    row.get::<usize, String>(0)?, 
+                    row.get::<usize, String>(1)?,
+                    row.get::<usize, String>(2)?,
+                    row.get::<usize, String>(3)?,
+                    row.get::<usize, Option<String>>(4)?,
+                    row.get::<usize, String>(5)?,
+                    row.get::<usize, Option<String>>(6)?,
+                    row.get::<usize, Option<String>>(7)?,
+                    row.get::<usize, Option<String>>(8)?,
+                ))
+            })
+            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+            .collect::<Vec<_>>();
+
+            data.data.insert("zugriffe".to_string(), KontoTabelle {
+                spalten: vec![
+                    "id".to_string(),
+                    "name".to_string(),
+                    "email".to_string(),
+                    "typ".to_string(),
+                    "grund".to_string(),
+                    "blaetter".to_string(),
+                    "gewaehrt_von".to_string(),
+                    "abgelehnt_von".to_string(),
+                    "am".to_string(),
+                ],
+                daten: zugriffe.into_iter().filter_map(|row| {
+                    let row = row.ok()?;
+                    Some((row.0.clone(), vec![
+                        row.0.clone(), 
+                        row.1.clone(), 
+                        row.2.clone(),
+                        row.3.clone(),
+                        row.4.clone().unwrap_or_default(),
+                        row.5.clone(),
+                        row.6.clone().unwrap_or_default(),
+                        row.7.clone().unwrap_or_default(),
+                        row.8.clone().unwrap_or_default(),
+                    ]))
+                }).collect(),
+            });
+
+            // Benutzer
+            let mut stmt = conn
+            .prepare("
+                SELECT 
+                    benutzer.name, 
+                    benutzer.email, 
+                    benutzer.rechte, 
+                    publickeys.pubkey, 
+                    publickeys.fingerprint 
+                FROM benutzer 
+                LEFT JOIN publickeys
+                ON publickeys.email = benutzer.email
+            ")
+            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 2"))?;
+
+            let benutzer = stmt
+            .query_map(rusqlite::params![], |row| {
+                Ok((
+                    row.get::<usize, String>(0)?, 
+                    row.get::<usize, String>(1)?,
+                    row.get::<usize, String>(2)?,
+                    row.get::<usize, Option<String>>(3)?,
+                    row.get::<usize, Option<String>>(4)?,
+                ))
+            })
+            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+            .collect::<Vec<_>>();
+
+            data.data.insert("benutzer".to_string(), KontoTabelle {
+                spalten: vec![
+                    "name".to_string(),
+                    "email".to_string(),
+                    "rechte".to_string(),
+                    "publickeys.fingerprint".to_string(),
+                    "publickeys.pubkey".to_string(),
+                ],
+                daten: benutzer.into_iter().filter_map(|row| {
+                    let row = row.ok()?;
+                    Some((row.1.clone(), vec![
+                        row.0.clone(), 
+                        row.1.clone(), 
+                        row.2.clone(),
+                        row.3.clone().unwrap_or_default(),
+                        row.4.clone().unwrap_or_default(),
+                    ]))
+                }).collect(),
+            });
+
+            let mut stmt = conn
+            .prepare("SELECT land, amtsgericht, bezirk FROM bezirke")
+            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 3"))?;
+
+            let bezirke = stmt
+            .query_map(rusqlite::params![], |row| {
+                Ok((
+                    row.get::<usize, String>(0)?, 
+                    row.get::<usize, String>(1)?,
+                    row.get::<usize, String>(2)?,
+                ))
+            })
+            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+            .collect::<Vec<_>>();
+
+            data.data.insert("bezirke".to_string(), KontoTabelle {
+                spalten: vec![
+                    "land".to_string(),
+                    "amtsgericht".to_string(),
+                    "bezirk".to_string(),
+                ],
+                daten: bezirke.into_iter().enumerate().filter_map(|(i, row)| {
+                    let row = row.ok()?;
+                    Some((format!("{i}"), vec![
+                        row.0.clone(), 
+                        row.1.clone(), 
+                        row.2.clone(),
+                    ]))
+                }).collect(),
+            });
+
+            let aenderungen = crate::db::get_aenderungen(AenderungFilter::GetLast(500));
+            data.data.insert("aenderungen".to_string(), KontoTabelle {
+                spalten: vec![
+                    "id".to_string(),
+                    "name".to_string(),
+                    "email".to_string(),
+                    "zeit-sec".to_string(),
+                    "zeit-offset".to_string(),
+                    "zeit-tz".to_string(),
+                    "zusammenfassung".to_string(),
+                ],
+                daten: aenderungen
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, a)| (i.to_string(), a))
+                    .collect(),
+            });
+
+            // Benutzer
+            let mut stmt = conn
+            .prepare("
+                SELECT 
+                    benutzer.name, 
+                    benutzer.email, 
+                    benutzer.rechte, 
+                    publickeys.pubkey, 
+                    publickeys.fingerprint 
+                FROM benutzer 
+                LEFT JOIN publickeys
+                ON publickeys.email = benutzer.email
+                WHERE benutzer.id = ?1
+            ")
+            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
+
+            let benutzer = stmt
+            .query_map(rusqlite::params![benutzer_info.id], |row| {
+                Ok((
+                    row.get::<usize, String>(0)?, 
+                    row.get::<usize, String>(1)?,
+                    row.get::<usize, String>(2)?,
+                    row.get::<usize, Option<String>>(3)?,
+                    row.get::<usize, Option<String>>(4)?,
+                ))
+            })
+            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+            .collect::<Vec<_>>();
+
+            data.data.insert("meine-kontodaten".to_string(), KontoTabelle {
+                spalten: vec![
+                    "name".to_string(),
+                    "email".to_string(),
+                    "rechte".to_string(),
+                    "publickeys.fingerprint".to_string(),
+                    "publickeys.pubkey".to_string(),
+                ],
+                daten: benutzer.into_iter().filter_map(|row| {
+                    let row = row.ok()?;
+                    Some((row.1.clone(), vec![
+                        row.0.clone(), 
+                        row.1.clone(), 
+                        row.2.clone(),
+                        row.3.clone().unwrap_or_default(),
+                        row.4.clone().unwrap_or_default(),
+                    ]))
+                }).collect(),
+            });
+        }
+        "bearbeiter" => {
+
+            let aenderungen = crate::db::get_aenderungen(AenderungFilter::FilterEmail(benutzer_info.email.clone()));
+            data.data.insert("meine-aenderungen".to_string(), KontoTabelle {
+                spalten: vec![
+                    "id".to_string(),
+                    "name".to_string(),
+                    "email".to_string(),
+                    "zeit-sec".to_string(),
+                    "zeit-offset".to_string(),
+                    "zeit-tz".to_string(),
+                    "zusammenfassung".to_string(),
+                ],
+                daten: aenderungen
+                    .into_iter()
+                    .filter(|a| a[2] == benutzer_info.email)
+                    .enumerate()
+                    .map(|(i, a)| (i.to_string(), a))
+                    .collect(),
+            });
+
+            // Benutzer
+            let mut stmt = conn
+            .prepare("
+                SELECT 
+                    benutzer.name, 
+                    benutzer.email, 
+                    benutzer.rechte, 
+                    publickeys.pubkey, 
+                    publickeys.fingerprint 
+                FROM benutzer 
+                LEFT JOIN publickeys
+                ON publickeys.email = benutzer.email
+                WHERE benutzer.id = ?1
+            ")
+            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
+
+            let benutzer = stmt
+            .query_map(rusqlite::params![benutzer_info.id], |row| {
+                Ok((
+                    row.get::<usize, String>(0)?, 
+                    row.get::<usize, String>(1)?,
+                    row.get::<usize, String>(2)?,
+                    row.get::<usize, Option<String>>(3)?,
+                    row.get::<usize, Option<String>>(4)?,
+                ))
+            })
+            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+            .collect::<Vec<_>>();
+
+            data.data.insert("meine-kontodaten".to_string(), KontoTabelle {
+                spalten: vec![
+                    "name".to_string(),
+                    "email".to_string(),
+                    "rechte".to_string(),
+                    "publickeys.fingerprint".to_string(),
+                    "publickeys.pubkey".to_string(),
+                ],
+                daten: benutzer.into_iter().filter_map(|row| {
+                    let row = row.ok()?;
+                    Some((row.1.clone(), vec![
+                        row.0.clone(), 
+                        row.1.clone(), 
+                        row.2.clone(),
+                        row.3.clone().unwrap_or_default(),
+                        row.4.clone().unwrap_or_default(),
+                    ]))
+                }).collect(),
+            });
+
+        },
+        "gast" => {
+
+            let mut stmt = conn
+            .prepare("
+                SELECT 
+                    benutzer.name, 
+                    benutzer.email, 
+                    benutzer.rechte, 
+                FROM benutzer 
+                WHERE benutzer.id = ?1
+            ")
+            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 5"))?;
+
+            let benutzer = stmt
+            .query_map(rusqlite::params![benutzer_info.id], |row| {
+                Ok((
+                    row.get::<usize, String>(0)?, 
+                    row.get::<usize, String>(1)?,
+                    row.get::<usize, String>(2)?
+                ))
+            })
+            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+            .collect::<Vec<_>>();
+
+            data.data.insert("meine-kontodaten".to_string(), KontoTabelle {
+                spalten: vec![
+                    "name".to_string(),
+                    "email".to_string(),
+                    "rechte".to_string(),
+                ],
+                daten: benutzer.into_iter().filter_map(|row| {
+                    let row = row.ok()?;
+                    Some((row.1.clone(), vec![
+                        row.0.clone(), 
+                        row.1.clone(), 
+                        row.2.clone(),
+                    ]))
+                }).collect(),
+            });
+        },
         _ => {}
     }
 
     Ok(data)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AenderungFilter {
+    GetLast(usize),
+    FilterEmail(String),
+}
+
+pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
+
+    let repo = match Repository::open(get_data_dir(MountPoint::Local)) {
+        Ok(s) => s,
+        Err(e) => return Vec::new(),
+    };
+
+    let head = repo
+    .head()
+    .ok()
+    .and_then(|c| c.target())
+    .and_then(|head_target| repo.find_commit(head_target).ok());
+
+    let head = match head {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    let commits = vec![
+        format!("{}", head.id()),
+        head.author().name().unwrap_or("").to_string(),
+        head.author().email().unwrap_or("").to_string(),
+        head.author().when().seconds().to_string(),
+        head.author().when().offset_minutes().to_string(),
+        head.author().when().sign().to_string(),
+        head.summary().map(|s| s.to_string()).unwrap_or_default(),
+    ];
+
+    let commits = match filter {
+        AenderungFilter::GetLast(i) => { 
+            let mut v = if i == 0  {
+                Vec::new()
+            } else {
+                vec![commits]
+            };
+
+            if i <= 1 { return v; }
+
+            v.extend(head.parents().take(i - 1).map(|c| {
+                vec![
+                    format!("{}", c.id()),
+                    c.author().name().unwrap_or("").to_string(),
+                    c.author().email().unwrap_or("").to_string(),
+                    c.author().when().seconds().to_string(),
+                    c.author().when().offset_minutes().to_string(),
+                    c.author().when().sign().to_string(),
+                    c.summary().map(|s| s.to_string()).unwrap_or_default(),
+                ]
+            }));
+
+            v
+        },
+        AenderungFilter::FilterEmail(s) => {
+            let mut v = if s == commits[2] {
+                vec![commits]
+            } else {
+                Vec::new()
+            };
+
+            v.extend(head.parents().filter_map(|c| {
+                let author = c.author();
+                let email = author.email().unwrap_or("");
+                if email != s {
+                    return None;
+                } else {
+                    Some(vec![
+                        format!("{}", c.id()),
+                        c.author().name().unwrap_or("").to_string(),
+                        email.to_string(),
+                        c.author().when().seconds().to_string(),
+                        c.author().when().offset_minutes().to_string(),
+                        c.author().when().sign().to_string(),
+                        c.summary().map(|s| s.to_string()).unwrap_or_default(),
+                    ])
+                }
+            }));
+
+            v
+        }
+    };
+
+    commits
+}
+
 pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
+
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
         .prepare("SELECT benutzer, gueltig_bis FROM sessions WHERE token = ?1")
-        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 6"))?;
 
-        let tokens = stmt
-        .query_map(rusqlite::params![token], |row| {
-            Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(1)?))
-        })
-        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-        .collect::<Vec<_>>();
+    let tokens = stmt
+    .query_map(rusqlite::params![token], |row| {
+        Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(1)?))
+    })
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+    .collect::<Vec<_>>();
 
     let result = tokens.get(0).and_then(|t| {
         t.as_ref()
@@ -443,7 +880,7 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
 
     let mut stmt = conn
         .prepare("SELECT name, email, rechte FROM benutzer WHERE id = ?1")
-        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 6"))?;
 
     let benutzer = stmt
         .query_map(rusqlite::params![id], |row| {
@@ -492,7 +929,7 @@ pub fn check_password(
 
     let mut stmt = conn
         .prepare("SELECT id, name, email, rechte, password_hashed FROM benutzer WHERE email = ?1")
-        .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten")))?;
+        .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten 7")))?;
 
     let benutzer = stmt
         .query_map(rusqlite::params![email], |row| {
@@ -529,7 +966,7 @@ pub fn check_password(
 
     let mut stmt = conn
         .prepare("SELECT token, gueltig_bis FROM sessions WHERE benutzer = ?1")
-        .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten")))?;
+        .map_err(|e| Some(format!("Fehler beim Auslesen der Benutzerdaten 8")))?;
 
     let tokens = stmt
         .query_map(rusqlite::params![info.id], |row| {
@@ -569,7 +1006,7 @@ pub fn insert_token_into_sessions(
 
     let mut stmt = conn
         .prepare("SELECT id, name, email, rechte, password_hashed FROM benutzer WHERE email = ?1")
-        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten"))?;
+        .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 9"))?;
 
     let benutzer = stmt
         .query_map(rusqlite::params![email], |row| {

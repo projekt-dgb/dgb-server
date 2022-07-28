@@ -272,6 +272,8 @@ pub mod konto {
     use actix_web::{get, post, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
 
+    use crate::db::KontoData;
+
     // Konto-Seite
     #[get("/konto")]
     async fn konto_get(req: HttpRequest) -> impl Responder {
@@ -286,14 +288,15 @@ pub mod konto {
 
         let konto_data = match crate::db::get_konto_data(&benutzer) {
             Ok(b) => b,
-            Err(_) => {
-                return HttpResponse::Found()
-                    .append_header(("Location", "/login"))
-                    .finish();
+            Err(e) => {
+                println!("Error: {e}");
+                KontoData::default()
             }
         };
 
-        let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
+        let konto_data_json = serde_json::to_string(&konto_data)
+        .unwrap_or_default();
+        
         let html = include_str!("../web/konto.html")
             .replace(
                 "<!-- CSS -->",
