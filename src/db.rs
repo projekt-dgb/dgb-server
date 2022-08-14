@@ -2,7 +2,7 @@
 
 use crate::{
     api::pull::{PullResponse, PullResponseError},
-    models::{get_db_path, AbonnementInfo, BenutzerInfo, get_data_dir},
+    models::{get_db_path, AbonnementInfo, BenutzerInfo, get_data_dir, PdfFile},
     MountPoint,
 };
 use chrono::{DateTime, Utc};
@@ -178,15 +178,24 @@ pub fn create_gemarkung(
     amtsgericht: &str,
     bezirk: &str,
 ) -> Result<(), String> {
+
+    let land = match Bundesland::from_code(land) {
+        Some(s) => s,
+        None => match Bundesland::from_string(land) {
+            Some(s) => s,
+            None => { return Err(format!("Ungültiges Bundesland")); },
+        }
+    };
+
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
         "INSERT INTO bezirke (land, amtsgericht, bezirk) VALUES (?1, ?2, ?3)",
-        rusqlite::params![land, amtsgericht, bezirk],
+        rusqlite::params![land.into_code(), amtsgericht, bezirk],
     )
     .map_err(|e| {
-        format!("Fehler beim Einfügen von {land}/{amtsgericht}/{bezirk} in Datenbank: {e}")
+        format!("Fehler beim Einfügen von {}/{amtsgericht}/{bezirk} in Datenbank: {e}", land.into_str())
     })?;
 
     Ok(())
@@ -219,21 +228,239 @@ pub fn get_gemarkungen() -> Result<GemarkungsBezirke, String> {
     Ok(bz)
 }
 
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub enum Bundesland {
+    BadenWuerttemberg,
+    Bayern,
+    Berlin,
+    Brandenburg,
+    Bremen,
+    Hamburg,
+    Hessen,
+    MecklenburgVorpommern,
+    Niedersachsen,
+    NordrheinWestfalen,
+    RheinlandPfalz,
+    Saarland,
+    Sachsen,
+    SachsenAnhalt,
+    SchleswigHolstein,
+    Thueringen,
+}
+
+impl Bundesland {
+
+    pub fn into_code(&self) -> &'static str {
+        use self::Bundesland::*;
+        match self {
+            BadenWuerttemberg => "BWB",
+            Bayern => "BYN",
+            Berlin => "BLN",
+            Brandenburg => "BRA",
+            Bremen => "BRE",
+            Hamburg => "HAM",
+            Hessen => "HES",
+            MecklenburgVorpommern => "MPV",
+            Niedersachsen => "NSA",
+            NordrheinWestfalen => "NRW",
+            RheinlandPfalz => "RLP",
+            Saarland => "SRL",
+            Sachsen => "SAC",
+            SachsenAnhalt => "SAA",
+            SchleswigHolstein => "SLH",
+            Thueringen => "THU",
+        }
+    }
+
+    pub fn into_str(&self) -> &'static str {
+        use self::Bundesland::*;
+        match self {
+            BadenWuerttemberg => "Baden-Württemberg",
+            Bayern => "Bayern",
+            Berlin => "Berlin",
+            Brandenburg => "Brandenburg",
+            Bremen => "Bremen",
+            Hamburg => "Hamburg",
+            Hessen => "Hessen",
+            MecklenburgVorpommern => "Mecklenburg-Vorpommern",
+            Niedersachsen => "Niedersachsen",
+            NordrheinWestfalen => "Nordrhein-Westfalen",
+            RheinlandPfalz => "Rheinland-Pfalz",
+            Saarland => "Saarland",
+            Sachsen => "Sachsen",
+            SachsenAnhalt => "Sachsen-Anhalt",
+            SchleswigHolstein => "Schleswig-Holstein",
+            Thueringen => "Thüringen",
+        }
+    }
+
+    pub fn from_string(s: &str) -> Option<Self> {
+        use self::Bundesland::*;
+        match s {
+            "Baden-Württemberg" => Some(BadenWuerttemberg),
+            "Bayern" => Some(Bayern),
+            "Berlin" => Some(Berlin),
+            "Brandenburg" => Some(Brandenburg),
+            "Bremen" => Some(Bremen),
+            "Hamburg" => Some(Hamburg),
+            "Hessen" => Some(Hessen),
+            "Mecklenburg-Vorpommern" => Some(MecklenburgVorpommern),
+            "Niedersachsen" => Some(Niedersachsen),
+            "Nordrhein-Westfalen" => Some(NordrheinWestfalen),
+            "Rheinland-Pfalz" => Some(RheinlandPfalz),
+            "Saarland" => Some(Saarland),
+            "Sachsen" => Some(Sachsen),
+            "Sachsen-Anhalt" => Some(SachsenAnhalt),
+            "Schleswig-Holstein" => Some(SchleswigHolstein),
+            "Thüringen" => Some(Thueringen),
+            _ => None,
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        use self::Bundesland::*;
+        match code {
+            "BWB" => Some(BadenWuerttemberg),
+            "BYN" => Some(Bayern),
+            "BLN" => Some(Berlin),
+            "BRA" => Some(Brandenburg),
+            "BRE" => Some(Bremen),
+            "HAM" => Some(Hamburg),
+            "HES" => Some(Hessen),
+            "MPV" => Some(MecklenburgVorpommern),
+            "NSA" => Some(Niedersachsen),
+            "NRW" => Some(NordrheinWestfalen),
+            "RLP" => Some(RheinlandPfalz),
+            "SRL" => Some(Saarland),
+            "SAC" => Some(Sachsen),
+            "SAA" => Some(SachsenAnhalt),
+            "SLH" => Some(SchleswigHolstein),
+            "THU" => Some(Thueringen),
+            _ => None,
+        }
+    }
+}
+
+pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, String> {
+
+    let bundesland_clean = match bundesland {
+        "ALLE_BUNDESLAENDER" => return {
+            Ok(get_gemarkungen()?
+            .into_iter()
+            .map(|(_, ag, _)| ag.clone())
+            .collect())
+        },
+        other => {
+            Bundesland::from_code(other)
+            .ok_or(format!("Ungültige Bundesland-ID"))?
+        },
+    };
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT amtsgericht FROM bezirke where land = ?1")
+        .map_err(|_| format!("Fehler beim Auslesen der Bezirke"))?;
+        
+    let bezirke = stmt
+        .query_map([bundesland_clean.into_code()], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    Ok(bezirke
+    .into_iter()
+    .filter_map(|b| Some(b.ok()?.0))
+    .collect())
+}
+
+pub fn get_bezirke_for_amtsgericht(amtsgericht: &str) -> Result<Vec<String>, String> {
+
+    let amtsgericht_clean = match amtsgericht {
+        "ALLE_AMTSGERICHTE" => return {
+            Ok(get_gemarkungen()?
+            .into_iter()
+            .map(|(_, _, bezirk)| bezirk.clone())
+            .collect())
+        },
+        other => other,
+    };
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT bezirk FROM bezirke where amtsgericht = ?1")
+        .map_err(|_| format!("Fehler beim Auslesen der Bezirke"))?;
+        
+    let bezirke = stmt
+        .query_map([amtsgericht_clean], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    Ok(bezirke
+    .into_iter()
+    .filter_map(|b| Some(b.ok()?.0))
+    .collect())
+}
+
+pub fn get_blaetter_for_bezirk(land: &str, amtsgericht: &str, bezirk: &str) -> Result<Vec<String>, String> {
+    use std::path::Path;
+    let land = match Bundesland::from_code(land) {
+        Some(s) => s,
+        None => match Bundesland::from_string(land) {
+            Some(s) => s,
+            None => { return Err(format!("Ungültiges Bundesland")); },
+        }
+    };
+    let folder = Path::new(&get_data_dir(MountPoint::Local)).join(land.into_str()).join(amtsgericht).join(bezirk);
+    if !folder.exists() || !folder.is_dir() {
+        return Ok(Vec::new());
+    }
+    
+    let paths = std::fs::read_dir(folder).map_err(|e| format!("{e}"))?;
+    let mut blaetter = Vec::new();
+    for path in paths {
+        let path = path.map_err(|e| format!("{e}"))?.path();
+        let file = std::fs::read_to_string(path).map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;        
+        let parsed: PdfFile = serde_json::from_str(&file).map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;
+        blaetter.push(parsed.analysiert.titelblatt.blatt.to_string());
+    }
+
+    Ok(blaetter)
+}
+
 pub fn delete_gemarkung(
     mount_point: MountPoint,
     land: &str,
     amtsgericht: &str,
     bezirk: &str,
 ) -> Result<(), String> {
+
+    let land = match Bundesland::from_code(land) {
+        Some(s) => s,
+        None => match Bundesland::from_string(land) {
+            Some(s) => s,
+            None => { return Err(format!("Ungültiges Bundesland")); },
+        }
+    };
+
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.execute(
         "DELETE FROM bezirke WHERE land = ?1 AND amtsgericht = ?2 AND bezirk = ?3",
-        rusqlite::params![land, amtsgericht, bezirk],
+        rusqlite::params![land.into_code(), amtsgericht, bezirk],
     )
     .map_err(|e| {
-        format!("Fehler beim Löschen von {land}/{amtsgericht}/{bezirk} in Datenbank: {e}")
+        format!("Fehler beim Löschen von {}/{amtsgericht}/{bezirk} in Datenbank: {e}", land.into_str())
     })?;
 
     Ok(())
@@ -561,8 +788,9 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 ],
                 daten: bezirke.into_iter().enumerate().filter_map(|(i, row)| {
                     let row = row.ok()?;
+                    let bundesland = Bundesland::from_code(&row.0)?.into_str().to_string();
                     Some((format!("{i}"), vec![
-                        row.0.clone(), 
+                        bundesland, 
                         row.1.clone(), 
                         row.2.clone(),
                     ]))

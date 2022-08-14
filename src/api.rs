@@ -133,7 +133,33 @@ pub mod index {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct ZugriffJsonPost {
+    pub enum ZugriffJsonPost {
+        GetAmtsgerichte(ZugriffJsonGetAmtsgerichte),
+        GetBezirke(ZugriffJsonGetBezirke),
+        GetBlaetter(ZugriffJsonGetBlaetter),
+        Anfrage(ZugriffJsonAnfrage),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ZugriffJsonGetAmtsgerichte {
+        land: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ZugriffJsonGetBezirke {
+        land: String,
+        amtsgericht: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ZugriffJsonGetBlaetter {
+        land: String,
+        amtsgericht: String,
+        bezirk: String,
+    }
+    
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ZugriffJsonAnfrage {
         // name: String,
         // email: String,
         // blaetter: { land, amtsgericht, blatt }
@@ -141,12 +167,88 @@ pub mod index {
         // grund: Vec<String>
     }
 
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum ZugriffJsonResponse {
+        Ok(ZugriffJsonResponseOk),
+        Error(ZugriffJsonResponseError),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum ZugriffJsonResponseOk {
+        GetAmtsgerichte(ZugriffJsonGetAmtsgerichteResponseOk),
+        GetBezirke(ZugriffJsonGetBezirkeResponseOk),
+        GetBlaetter(ZugriffJsonGetBlaetterResponseOk),
+        Anfrage(ZugriffJsonAnfrageResponseOk),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonGetAmtsgerichteResponseOk {
+        amtsgerichte: Vec<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonGetBezirkeResponseOk {
+        bezirke: Vec<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonGetBlaetterResponseOk {
+        blaetter: Vec<String>,
+    }
+    
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonAnfrageResponseOk {
+
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonResponseError {
+        code: usize,
+        text: String,
+    }
+
     // Login-Seite
     #[post("/zugriff")]
-    async fn zugriff_post(json: web::Json<ZugriffJsonPost>, req: HttpRequest) -> impl Responder {
+    pub async fn zugriff_post(json: web::Json<ZugriffJsonPost>, req: HttpRequest) -> impl Responder {
+        let response = zugriff_post_inner(&*json).await;
+
         HttpResponse::Ok()
         .content_type("application/json")
-        .body("{}")
+        .body(match response {
+            Ok(o) => serde_json::to_string_pretty(&ZugriffJsonResponse::Ok(o)).unwrap_or_default(),
+            Err(e) => serde_json::to_string_pretty(&ZugriffJsonResponse::Error(ZugriffJsonResponseError {
+                code: 500,
+                text: e.clone(),
+            })).unwrap_or_default(),
+        })
+    }
+
+    async fn zugriff_post_inner(json: &ZugriffJsonPost) -> Result<ZugriffJsonResponseOk, String> {
+        use self::ZugriffJsonPost::*;
+        
+        match json {
+            GetAmtsgerichte(ga) => {
+                let amtsgerichte = crate::db::get_amtsgerichte_for_bundesland(&ga.land)?;
+                Ok(ZugriffJsonResponseOk::GetAmtsgerichte(ZugriffJsonGetAmtsgerichteResponseOk {
+                    amtsgerichte
+                }))
+            },
+            GetBezirke(gb) => {
+                let bezirke = crate::db::get_bezirke_for_amtsgericht(&gb.amtsgericht)?;
+                Ok(ZugriffJsonResponseOk::GetBezirke(ZugriffJsonGetBezirkeResponseOk {
+                    bezirke
+                }))
+            },
+            GetBlaetter(gb) => {
+                let blaetter = crate::db::get_blaetter_for_bezirk(&gb.land, &gb.amtsgericht, &gb.bezirk)?;
+                Ok(ZugriffJsonResponseOk::GetBlaetter(ZugriffJsonGetBlaetterResponseOk {
+                    blaetter
+                }))
+            },
+            Anfrage(a) => {
+                Ok(ZugriffJsonResponseOk::Anfrage(ZugriffJsonAnfrageResponseOk { }))
+            },
+        }
     }
 
     #[get("/konto.js")]

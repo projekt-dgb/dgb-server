@@ -29,49 +29,23 @@
             </div>
             <div>
                 <label>Ich benötige Zugriff auf die Blätter</label><br/>
-                <div class="zugriff-blatt">
-                    <select name="zugriff_blatt[bundesland]">
-                        <option selected="selected" value="ALLE_BUNDESLAENDER">alle Bundesländer</option>
-                        <option value="BWB">Baden Württemberg</option>
-                        <option value="BYN">Bayern</option>
-                        <option value="BLN">Berlin</option>
-                        <option value="BRA">Brandenburg</option>
-                        <option value="BRE">Bremen</option>
-                        <option value="HAM">Hamburg</option>
-                        <option value="HES">Hessen</option>
-                        <option value="MPV">Mecklenburg-Vorpommern</option>
-                        <option value="NSA">Niedersachsen</option>
-                        <option value="NRW">Nordrhein Westfalen</option>
-                        <option value="RLP">Rheinland-Pfalz</option>
-                        <option value="SRL">Saarland</option>
-                        <option value="SAC">Sachsen</option>
-                        <option value="SAA">Sachsen-Anhalt</option>
-                        <option value="SLH">Schleswig-Holstein</option>
-                        <option value="THU">Thüringen</option>
-                    </select>
-                    <select name="zugriff_blatt[amtsgericht]">
-                        <option selected="selected" value="ALLE_AMTSGERICHTE">alle Amtsgerichte</option>
-                    </select>
-                    <select name="zugriff_blatt[grundbuchbezirk]">
-                        <option selected="selected" value="ALLE_GRUNDBUCHBEZIRKE">alle Grundbuchbezirke</option>
-                    </select>
-                </div>
-                <button>Blatt hinzufügen</button>
+                <div id="zugriff-blaetter"></div>
+                <button onclick="blattHinzufuegen(event)">Blatt hinzufügen</button>
             </div>
 
             <div>
                 <label for="typ">Ich benötige Einsicht in die obigen Grundbuchblätter als:</label><br/>
                 <select name="typ">
-                    <option selected="selected" value="GAST">Inhaber des Blatts</option>
-                    <option value="M-OD">Mitarbeiter ÖD (Lesezugriff)</option>
-                    <option value="B-OD">Bearbeiter ÖD (Lese + Schreibzugriff)</option>
-                    <option value="SONSTIGE">Sonstiger Berechtigter (Grund angeben)</option>
+                    <option selected="selected" value="GAST">Inhaber/in des Blatts</option>
+                    <option value="M-OD">Mitarbeiter/in ÖD (Lesezugriff)</option>
+                    <option value="B-OD">Bearbeiter/in ÖD (Lese + Schreibzugriff)</option>
+                    <option value="SONSTIGE">Sonstiger Grund (bitte angeben)</option>
                 </select>
             </div>
 
             <div>
-                <label for="typ">Grund:</label><br/>
-                <textarea cols="50" rows = "8"></textarea>
+                <label for="grund">Grund:</label><br/>
+                <textarea id="grund" cols="50" rows = "8"></textarea>
             </div>
 
             <br/>
@@ -79,13 +53,135 @@
         </form>
         <script>
 
+        var defaultBlatt = {
+            bundesland: "ALLE_BUNDESLAENDER",
+            amtsgericht: "ALLE_AMTSGERICHTE",
+            amtsgerichte_verfuegbar: [{"ALLE_AMTSGERICHTE": "Alle Amtsgerichte"}],
+            grundbuchbezirk: "ALLE_GRUNDBUCHBEZIRKE",
+            grundbuchbezirke_verfuegbar: [{"ALLE_GRUNDBUCHBEZIRKE": "Alle Grundbuchbezirke"}],
+            blatt: "ALLE_BLAETTER",
+            blaetter_verfuegbar: [{"ALLE_BLAETTER": "Alle Grundbuchblätter"}],
+        };
+
+        var blaetter = [defaultBlatt];
+
+        function rerenderBlaetter() {
+            var dom = document.getElementById("zugriff-blaetter");
+            if (!dom) {
+                return;
+            }
+            dom.innerHTML = '';
+            for (var i = 0; i < blaetter.length; i++) {
+                var element = blaetter[i];
+                var bundesland = element.bundesland;
+                var html = [
+                    "<select id=\"zugriff_blatt-bundesland-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"bundeslandAendern(event)\">",
+                    "    <option " + (bundesland == "ALLE_BUNDESLAENDER" ? "selected " : "") + "value=\"ALLE_BUNDESLAENDER\">alle Bundesländer</option>",
+                    "    <option " + (bundesland == "BWB" ? "selected " : "") + "value=\"BWB\">Baden Württemberg</option>",
+                    "    <option " + (bundesland == "BYN" ? "selected " : "") + "value=\"BYN\">Bayern</option>",
+                    "    <option " + (bundesland == "BLN" ? "selected " : "") + "value=\"BLN\">Berlin</option>",
+                    "    <option " + (bundesland == "BRA" ? "selected " : "") + "value=\"BRA\">Brandenburg</option>",
+                    "    <option " + (bundesland == "BRE" ? "selected " : "") + "value=\"BRE\">Bremen</option>",
+                    "    <option " + (bundesland == "HAM" ? "selected " : "") + "value=\"HAM\">Hamburg</option>",
+                    "    <option " + (bundesland == "HES" ? "selected " : "") + "value=\"HES\">Hessen</option>",
+                    "    <option " + (bundesland == "MPV" ? "selected " : "") + "value=\"MPV\">Mecklenburg-Vorpommern</option>",
+                    "    <option " + (bundesland == "NSA" ? "selected " : "") + "value=\"NSA\">Niedersachsen</option>",
+                    "    <option " + (bundesland == "NRW" ? "selected " : "") + "value=\"NRW\">Nordrhein Westfalen</option>",
+                    "    <option " + (bundesland == "RLP" ? "selected " : "") + "value=\"RLP\">Rheinland-Pfalz</option>",
+                    "    <option " + (bundesland == "SRL" ? "selected " : "") + "value=\"SRL\">Saarland</option>",
+                    "    <option " + (bundesland == "SAC" ? "selected " : "") + "value=\"SAC\">Sachsen</option>",
+                    "    <option " + (bundesland == "SAA" ? "selected " : "") + "value=\"SAA\">Sachsen-Anhalt</option>",
+                    "    <option " + (bundesland == "SLH" ? "selected " : "") + "value=\"SLH\">Schleswig-Holstein</option>",
+                    "    <option " + (bundesland == "THU" ? "selected " : "") + "value=\"THU\">Thüringen</option>",
+                    "</select>",
+                    "<select id=\"zugriff_blatt-amtsgericht-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"amtsgerichtAendern(event)\">",
+                ];
+                
+                var html2 = [
+                    "    <option selected=\"selected\" value=\"ALLE_AMTSGERICHTE\">alle Amtsgerichte</option>",
+                    "</select>",
+                    "<select id=\"zugriff_blatt-grundbuchbezirk-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"grundbuchBezirkAendern(event)\">",
+                    "    <option selected=\"selected\" value=\"ALLE_GRUNDBUCHBEZIRKE\">alle Grundbuchbezirke</option>",
+                    "</select>",
+                    "<select id=\"zugriff_blatt-grundbuchblatt-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"grundbuchBlattAendern(event)\">",
+                    "    <option selected=\"selected\" value=\"ALLE_BLAETTER\">alle Grundbuchblätter</option>",
+                    "</select>",
+                    "<button onclick=\"blattLoeschen(event)\" data-blatt-id=\"" + i + "\">x</button>",
+                ];
+
+                dom.appendChild(htmlToElement(html.join("\r\n")));
+            }
+        }
+
+        function htmlToElement(html) {
+            var template = document.createElement('div');
+            html = html.trim();
+            template.innerHTML = html;
+            return template;
+        }
+
+        function bundeslandAendern(event) {
+            var newBundesland = event.target.value;
+            var id = parseInt(event.target.dataset.blattId);
+            blaetter[id].bundesland = newBundesland;
+            // loadAmtsgerichte(newBundesland)
+        }
+
+        function updateAmtsgerichte(id, liste) {
+
+        }
+
+        function amtsgerichtAendern(event) {
+            var newAmtsgericht = event.target.value;
+            var id = parseInt(event.target.dataset.blattId);
+            blaetter[id].amtsgericht = newAmtsgericht;
+            // loadBezirke(newAmtsgericht)
+        }
+
+        function grundbuchBezirkAendern(event) {
+            var newBezirk = event.target.value;
+            var id = parseInt(event.target.dataset.blattId);
+            blaetter[id].grundbuchbezirk = newBezirk;
+            getListe("blaetter", id)
+        }
+
+        function grundbuchBlattAendern(event) {
+            var newBlatt = event.target.value;
+            var id = parseInt(event.target.dataset.blattId);
+            blaetter[id].blatt = newBlatt;
+        }
+
+        function getListe(typ, id, f) {
+            var bundesland = blaetter[id].bundesland;
+            var amtsgericht = blaetter[id].amtsgericht;
+            var grundbuchbezirk = blaetter[id].grundbuchbezirk;
+
+        }
+
+        function blattHinzufuegen(event) {
+            event.preventDefault();
+            blaetter.push(defaultBlatt);
+            rerenderBlaetter();
+        }
+
+        function blattLoeschen(event) {
+            event.preventDefault();
+            var blattId = event.target.dataset.blattId;
+            if (!blattId) {
+                return;
+            }
+            blaetter.splice(parseInt(blattId));
+            rerenderBlaetter();
+        }
+
         function onLoginSubmit(event) {
 
             event.preventDefault();
             
             var name = document.getElementById("name").value;
             var email = document.getElementById("email").value;
-            // zugriff_blatt[bundesland]
+            var typ = document.getElementById("typ").value;
+            var grund = document.getElementById("grund").value;
 
             var http = new XMLHttpRequest();
             http.open('POST', '/zugriff', true);
@@ -103,12 +199,20 @@
                     }
                 }
             }
+            if (blaetter.length == 0) {
+                return false;
+            }
             http.send(JSON.stringify({
-
+                name: name,
+                email: email,
+                blaetter: blaetter,
+                typ: typ,
+                grund: grund,
             }));
             return false;
         }
 
+        addEventListener('DOMContentLoaded', (event) => { rerenderBlaetter(); });
         </script>
     </body>
 </html>
