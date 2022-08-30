@@ -584,10 +584,13 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
         HttpServer::new(move || {
             let app_state_clone = app_state_clone.clone();
 
+            let cors = actix_cors::Cors::permissive().allow_any_origin().supports_credentials();
+        
             App::new()
                 .app_data(json_cfg())
                 .app_data(actix_web::web::Data::new(app_state_clone))
                 .wrap(actix_web::middleware::Compress::default())
+                .wrap(cors)
                 .service(crate::api::index::status)
                 .service(crate::api::index::zugriff)
                 .service(crate::api::index::zugriff_post)

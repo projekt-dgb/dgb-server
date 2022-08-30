@@ -35,7 +35,7 @@
 
             <div>
                 <label for="typ">Ich benötige Einsicht in die obigen Grundbuchblätter als:</label><br/>
-                <select name="typ">
+                <select id="typ" name="typ">
                     <option selected="selected" value="GAST">Inhaber/in des Blatts</option>
                     <option value="M-OD">Mitarbeiter/in ÖD (Lesezugriff)</option>
                     <option value="B-OD">Bearbeiter/in ÖD (Lese + Schreibzugriff)</option>
@@ -56,14 +56,14 @@
         var defaultBlatt = {
             bundesland: "ALLE_BUNDESLAENDER",
             amtsgericht: "ALLE_AMTSGERICHTE",
-            amtsgerichte_verfuegbar: [{"ALLE_AMTSGERICHTE": "Alle Amtsgerichte"}],
+            amtsgerichte_verfuegbar: [],
             grundbuchbezirk: "ALLE_GRUNDBUCHBEZIRKE",
-            grundbuchbezirke_verfuegbar: [{"ALLE_GRUNDBUCHBEZIRKE": "Alle Grundbuchbezirke"}],
+            grundbuchbezirke_verfuegbar: [],
             blatt: "ALLE_BLAETTER",
-            blaetter_verfuegbar: [{"ALLE_BLAETTER": "Alle Grundbuchblätter"}],
+            blaetter_verfuegbar: [],
         };
 
-        var blaetter = [defaultBlatt];
+        var blaetter = [JSON.parse(JSON.stringify(defaultBlatt))];
 
         function rerenderBlaetter() {
             var dom = document.getElementById("zugriff-blaetter");
@@ -73,41 +73,67 @@
             dom.innerHTML = '';
             for (var i = 0; i < blaetter.length; i++) {
                 var element = blaetter[i];
-                var bundesland = element.bundesland;
                 var html = [
                     "<select id=\"zugriff_blatt-bundesland-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"bundeslandAendern(event)\">",
-                    "    <option " + (bundesland == "ALLE_BUNDESLAENDER" ? "selected " : "") + "value=\"ALLE_BUNDESLAENDER\">alle Bundesländer</option>",
-                    "    <option " + (bundesland == "BWB" ? "selected " : "") + "value=\"BWB\">Baden Württemberg</option>",
-                    "    <option " + (bundesland == "BYN" ? "selected " : "") + "value=\"BYN\">Bayern</option>",
-                    "    <option " + (bundesland == "BLN" ? "selected " : "") + "value=\"BLN\">Berlin</option>",
-                    "    <option " + (bundesland == "BRA" ? "selected " : "") + "value=\"BRA\">Brandenburg</option>",
-                    "    <option " + (bundesland == "BRE" ? "selected " : "") + "value=\"BRE\">Bremen</option>",
-                    "    <option " + (bundesland == "HAM" ? "selected " : "") + "value=\"HAM\">Hamburg</option>",
-                    "    <option " + (bundesland == "HES" ? "selected " : "") + "value=\"HES\">Hessen</option>",
-                    "    <option " + (bundesland == "MPV" ? "selected " : "") + "value=\"MPV\">Mecklenburg-Vorpommern</option>",
-                    "    <option " + (bundesland == "NSA" ? "selected " : "") + "value=\"NSA\">Niedersachsen</option>",
-                    "    <option " + (bundesland == "NRW" ? "selected " : "") + "value=\"NRW\">Nordrhein Westfalen</option>",
-                    "    <option " + (bundesland == "RLP" ? "selected " : "") + "value=\"RLP\">Rheinland-Pfalz</option>",
-                    "    <option " + (bundesland == "SRL" ? "selected " : "") + "value=\"SRL\">Saarland</option>",
-                    "    <option " + (bundesland == "SAC" ? "selected " : "") + "value=\"SAC\">Sachsen</option>",
-                    "    <option " + (bundesland == "SAA" ? "selected " : "") + "value=\"SAA\">Sachsen-Anhalt</option>",
-                    "    <option " + (bundesland == "SLH" ? "selected " : "") + "value=\"SLH\">Schleswig-Holstein</option>",
-                    "    <option " + (bundesland == "THU" ? "selected " : "") + "value=\"THU\">Thüringen</option>",
+                    "    <option " + (element.bundesland == "ALLE_BUNDESLAENDER" ? "selected " : "") + "value=\"ALLE_BUNDESLAENDER\">alle Bundesländer</option>",
+                    "    <option " + (element.bundesland == "BWB" ? "selected " : "") + "value=\"BWB\">Baden Württemberg</option>",
+                    "    <option " + (element.bundesland == "BYN" ? "selected " : "") + "value=\"BYN\">Bayern</option>",
+                    "    <option " + (element.bundesland == "BLN" ? "selected " : "") + "value=\"BLN\">Berlin</option>",
+                    "    <option " + (element.bundesland == "BRA" ? "selected " : "") + "value=\"BRA\">Brandenburg</option>",
+                    "    <option " + (element.bundesland == "BRE" ? "selected " : "") + "value=\"BRE\">Bremen</option>",
+                    "    <option " + (element.bundesland == "HAM" ? "selected " : "") + "value=\"HAM\">Hamburg</option>",
+                    "    <option " + (element.bundesland == "HES" ? "selected " : "") + "value=\"HES\">Hessen</option>",
+                    "    <option " + (element.bundesland == "MPV" ? "selected " : "") + "value=\"MPV\">Mecklenburg-Vorpommern</option>",
+                    "    <option " + (element.bundesland == "NSA" ? "selected " : "") + "value=\"NSA\">Niedersachsen</option>",
+                    "    <option " + (element.bundesland == "NRW" ? "selected " : "") + "value=\"NRW\">Nordrhein Westfalen</option>",
+                    "    <option " + (element.bundesland == "RLP" ? "selected " : "") + "value=\"RLP\">Rheinland-Pfalz</option>",
+                    "    <option " + (element.bundesland == "SRL" ? "selected " : "") + "value=\"SRL\">Saarland</option>",
+                    "    <option " + (element.bundesland == "SAC" ? "selected " : "") + "value=\"SAC\">Sachsen</option>",
+                    "    <option " + (element.bundesland == "SAA" ? "selected " : "") + "value=\"SAA\">Sachsen-Anhalt</option>",
+                    "    <option " + (element.bundesland == "SLH" ? "selected " : "") + "value=\"SLH\">Schleswig-Holstein</option>",
+                    "    <option " + (element.bundesland == "THU" ? "selected " : "") + "value=\"THU\">Thüringen</option>",
                     "</select>",
-                    "<select id=\"zugriff_blatt-amtsgericht-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"amtsgerichtAendern(event)\">",
                 ];
+
+
+                html.push("<select id=\"zugriff_blatt-amtsgericht-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"amtsgerichtAendern(event)\">");
                 
-                var html2 = [
-                    "    <option selected=\"selected\" value=\"ALLE_AMTSGERICHTE\">alle Amtsgerichte</option>",
-                    "</select>",
-                    "<select id=\"zugriff_blatt-grundbuchbezirk-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"grundbuchBezirkAendern(event)\">",
-                    "    <option selected=\"selected\" value=\"ALLE_GRUNDBUCHBEZIRKE\">alle Grundbuchbezirke</option>",
-                    "</select>",
-                    "<select id=\"zugriff_blatt-grundbuchblatt-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"grundbuchBlattAendern(event)\">",
-                    "    <option selected=\"selected\" value=\"ALLE_BLAETTER\">alle Grundbuchblätter</option>",
-                    "</select>",
-                    "<button onclick=\"blattLoeschen(event)\" data-blatt-id=\"" + i + "\">x</button>",
-                ];
+                var ag_selected = "";
+                if (element.amtsgericht == "ALLE_AMTSGERICHTE") { ag_selected = "selected "; }
+                html.push( "    <option " + ag_selected + " value=\"ALLE_AMTSGERICHTE\">alle Amtsgerichte</option>");
+
+                element.amtsgerichte_verfuegbar.forEach(e => {
+                    html.push("    <option " + (element.amtsgericht == e ? "selected " : "") + " value=\"" + e + "\">" + e + "</option>");
+                });
+                html.push("</select>");
+
+
+
+                html.push("<select id=\"zugriff_blatt-grundbuchbezirk-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"bezirkAendern(event)\">");
+                
+                var ag_selected = "";
+                if (element.bezirk == "ALLE_GRUNDBUCHBEZIRKE") { ag_selected = "selected "; }
+                html.push( "    <option " + ag_selected + " value=\"ALLE_GRUNDBUCHBEZIRKE\">alle Grundbuchbezirke</option>");
+
+                element.grundbuchbezirke_verfuegbar.forEach(e => {
+                    html.push("    <option " + (element.bezirk == e ? "selected " : "") + " value=\"" + e + "\">" + e + "</option>");
+                });
+                html.push("</select>");
+
+
+
+                html.push("<select id=\"zugriff_blatt-grundbuchblatt-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"blattAendern(event)\">");
+                
+                var ag_selected = "";
+                if (element.blatt == "ALLE_BLAETTER") { ag_selected = "selected "; }
+                html.push( "    <option " + ag_selected + " value=\"ALLE_BLAETTER\">alle Grundbuchblätter</option>");
+
+                element.blaetter_verfuegbar.forEach(e => {
+                    html.push("    <option " + (element.blatt == e ? "selected " : "") + " value=\"" + e + "\">" + e + "</option>");
+                });
+                html.push("</select>");
+
+                html.push("<button onclick=\"blattLoeschen(event)\" data-blatt-id=\"" + i + "\">x</button>");
 
                 dom.appendChild(htmlToElement(html.join("\r\n")));
             }
@@ -124,25 +150,43 @@
             var newBundesland = event.target.value;
             var id = parseInt(event.target.dataset.blattId);
             blaetter[id].bundesland = newBundesland;
-            // loadAmtsgerichte(newBundesland)
+            submitRequest("get-amtsgerichte", id, { land: newBundesland }, updateAmtsgerichte);
         }
 
-        function updateAmtsgerichte(id, liste) {
-
+        function updateAmtsgerichte(id, object) {
+            if (object.status !== "ok") { return; }
+            if (object.action !== "get-amtsgerichte") { return; }
+            var ag = object.data.amtsgerichte;
+            blaetter[id].amtsgerichte_verfuegbar = ag;
+            rerenderBlaetter();
         }
 
         function amtsgerichtAendern(event) {
             var newAmtsgericht = event.target.value;
             var id = parseInt(event.target.dataset.blattId);
             blaetter[id].amtsgericht = newAmtsgericht;
-            // loadBezirke(newAmtsgericht)
+            submitRequest("get-bezirke", id, { land: blaetter[id].bundesland, amtsgericht: newAmtsgericht }, updateBezirke);
+        }
+
+        function updateBezirke(id, object) {
+            if (object.status !== "ok") { return; }
+            if (object.action !== "get-bezirke") { return; }
+            blaetter[id].bezirke_verfuegbar = object.data.bezirke;
+            rerenderBlaetter();
         }
 
         function grundbuchBezirkAendern(event) {
             var newBezirk = event.target.value;
             var id = parseInt(event.target.dataset.blattId);
             blaetter[id].grundbuchbezirk = newBezirk;
-            getListe("blaetter", id)
+            submitRequest("get-blaetter", id, { land: blaetter[id].bundesland, amtsgericht: blaetter[id].amtsgericht, bezirk: newBezirk }, updateBlaetter);
+        }
+
+        function updateBlaetter(id, object) {
+            if (object.status !== "ok") { return; }
+            if (object.action !== "get-blaetter") { return; }
+            blaetter[id].blaetter_verfuegbar = object.data.blaetter;
+            rerenderBlaetter();
         }
 
         function grundbuchBlattAendern(event) {
@@ -151,16 +195,9 @@
             blaetter[id].blatt = newBlatt;
         }
 
-        function getListe(typ, id, f) {
-            var bundesland = blaetter[id].bundesland;
-            var amtsgericht = blaetter[id].amtsgericht;
-            var grundbuchbezirk = blaetter[id].grundbuchbezirk;
-
-        }
-
         function blattHinzufuegen(event) {
             event.preventDefault();
-            blaetter.push(defaultBlatt);
+            blaetter.push(JSON.parse(JSON.stringify(defaultBlatt)));
             rerenderBlaetter();
         }
 
@@ -170,8 +207,36 @@
             if (!blattId) {
                 return;
             }
-            blaetter.splice(parseInt(blattId));
+            blaetter.splice(parseInt(blattId), 1);
             rerenderBlaetter();
+        }
+
+        function submitRequest(type, id, object, f) {
+            var http = new XMLHttpRequest();
+            http.open('POST', 'http://127.0.0.1:8080/zugriff', true);
+            http.setRequestHeader('Content-type', 'application/json');
+            http.onreadystatechange = function() {
+                if (http.readyState == 4 && http.status == 200) {
+                    var object = JSON.parse(http.responseText);
+                    console.log(object);
+                    (f)(id, object);
+                }
+            }
+            http.send(JSON.stringify({
+                action: type,
+                data: object,
+            }));
+            return false;
+        }
+
+        function onSubmitOk(id, object) {
+            document.getElementById("formdata").reset();
+            console.log(object);
+            alert("Ihr Antrag wurde erfolgreich entgegengenommen. Bald erhalten Sie einen E-Mail mit dem Zugriffscode für Ihr Grundbuchblatt.")
+            /*
+                document.cookie = "Authentication=" + (object.token || "") + "; path=/";
+                window.location.href = '/konto';
+            */
         }
 
         function onLoginSubmit(event) {
@@ -182,33 +247,34 @@
             var email = document.getElementById("email").value;
             var typ = document.getElementById("typ").value;
             var grund = document.getElementById("grund").value;
-
-            var http = new XMLHttpRequest();
-            http.open('POST', '/zugriff', true);
-            http.setRequestHeader('Content-type', 'application/json');
-            http.onreadystatechange = function() {
-                if (http.readyState == 4 && http.status == 200) {
-                    document.getElementById("formdata").reset();
-                    var object = JSON.parse(http.responseText);
-                    console.log(object);
-                    if (object.status == "ok") {
-                        document.cookie = "Authentication=" + (object.token || "") + "; path=/";
-                        window.location.href = '/konto';
-                    } else if (object.status == "error") {
-                        console.error("" + object.code + ": " + object.text);
-                    }
-                }
-            }
+            var blaetter_clean = [];
+            
             if (blaetter.length == 0) {
                 return false;
             }
-            http.send(JSON.stringify({
-                name: name,
-                email: email,
-                blaetter: blaetter,
-                typ: typ,
-                grund: grund,
-            }));
+
+            for (var i = 0; i < blaetter.length; i++) {
+                var element = blaetter[i];
+                blaetter_clean.push({ 
+                    land: element.bundesland, 
+                    amtsgericht: element.amtsgericht, 
+                    grundbuchbezirk: element.grundbuchbezirk, 
+                    blatt: element.blatt 
+                });
+            }
+
+            var obj = { 
+                name: name, 
+                email: email, 
+                typ: typ, 
+                grund: grund, 
+                blaetter: blaetter_clean
+            };
+            
+            console.log(obj);
+
+            submitRequest("anfrage", 0, obj, onSubmitOk);
+
             return false;
         }
 

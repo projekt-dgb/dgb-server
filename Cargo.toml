@@ -36,6 +36,7 @@ actix-web-httpauth = { version = "0.6.0", default-features = false, features = [
 chrono = { version = "0.4.19", default-features = false, features = ["alloc", "std", "clock", "serde"] }
 uuid = { version = "1.1.2", default-features = false, features = ["v4", "fast-rng","macro-diagnostics"] }
 lz4_flex = { version = "0.9.3", default-features = false }
+actix-cors = { version = "0.6.2", default-features = false, features = [] }
 
 [dependencies.lettre]
 version = "0.10.0-rc.6"

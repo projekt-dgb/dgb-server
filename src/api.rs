@@ -133,10 +133,15 @@ pub mod index {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "action", content = "data")]
     pub enum ZugriffJsonPost {
+        #[serde(rename = "get-amtsgerichte")]
         GetAmtsgerichte(ZugriffJsonGetAmtsgerichte),
+        #[serde(rename = "get-bezirke")]
         GetBezirke(ZugriffJsonGetBezirke),
+        #[serde(rename = "get-blaetter")]
         GetBlaetter(ZugriffJsonGetBlaetter),
+        #[serde(rename = "anfrage")]
         Anfrage(ZugriffJsonAnfrage),
     }
 
@@ -160,24 +165,40 @@ pub mod index {
     
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ZugriffJsonAnfrage {
-        // name: String,
-        // email: String,
-        // blaetter: { land, amtsgericht, blatt }
-        // typ: String,
-        // grund: Vec<String>
+        name: String,
+        email: String,
+        typ: String,
+        grund: String,
+        blaetter: Vec<ZugriffJsonAnfrageBlatt>,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ZugriffJsonAnfrageBlatt {
+        land: String,
+        amtsgericht: String,
+        grundbuchbezirk: String,
+        blatt: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
     enum ZugriffJsonResponse {
+        #[serde(rename = "ok")]
         Ok(ZugriffJsonResponseOk),
+        #[serde(rename = "error")]
         Error(ZugriffJsonResponseError),
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "action", content = "data")]
     enum ZugriffJsonResponseOk {
+        #[serde(rename = "get-amtsgerichte")]
         GetAmtsgerichte(ZugriffJsonGetAmtsgerichteResponseOk),
+        #[serde(rename = "get-bezirke")]
         GetBezirke(ZugriffJsonGetBezirkeResponseOk),
+        #[serde(rename = "get-blaetter")]
         GetBlaetter(ZugriffJsonGetBlaetterResponseOk),
+        #[serde(rename = "anfrage")]
         Anfrage(ZugriffJsonAnfrageResponseOk),
     }
 
@@ -207,9 +228,16 @@ pub mod index {
         text: String,
     }
 
+    enum ZugriffTyp {
+        Gast,
+        Mitarbeiter,
+        Bearbeiter,
+        Sonstige,
+    }
+
     // Login-Seite
     #[post("/zugriff")]
-    pub async fn zugriff_post(json: web::Json<ZugriffJsonPost>, req: HttpRequest) -> impl Responder {
+    pub async fn zugriff_post(json: web::Json<ZugriffJsonPost>, _: HttpRequest) -> impl Responder {
         let response = zugriff_post_inner(&*json).await;
 
         HttpResponse::Ok()
@@ -246,6 +274,23 @@ pub mod index {
                 }))
             },
             Anfrage(a) => {
+                if a.name.is_empty() {
+                    return Err(format!("Kein Name angegeben"));
+                }
+                if a.email.is_empty() {
+                    return Err(format!("Keine E-Mail angegeben"));
+                }
+                let typ = match a.typ.as_str() {
+                    "GAST" => ZugriffTyp::Gast,
+                    "M-OD" => ZugriffTyp::Mitarbeiter,
+                    "B-OD" => ZugriffTyp::Bearbeiter,
+                    "SONSTIGE" => {
+                        if a.grund.trim().is_empty() { return Err("Kein Berechtigungsgrund angegeben für Typ \"Sonstiger Grund\"".to_string()); }
+                        ZugriffTyp::Sonstige
+                    },
+                    _ => { return Err(format!("Ungültiger \"typ\" angegeben")); },
+                };
+                crate::db::create_zugriff();
                 Ok(ZugriffJsonResponseOk::Anfrage(ZugriffJsonAnfrageResponseOk { }))
             },
         }
@@ -642,6 +687,18 @@ pub mod commit {
         BezirkLoeschen(BezirkLoeschenArgs),
         AboNeu(AboNeuArgs),
         AboLoeschen(AboLoeschenArgs),
+        CreateZugriff {
+            id: String,
+            name: String,
+            email: String,
+            typ: String,
+            grund: String,
+            datum: String,
+            land: String,
+            amtsgericht: String,
+            bezirk: String,
+            blatt: String,
+        },
         BenutzerSessionNeu {
             email: String,
             token: String,
@@ -736,6 +793,32 @@ pub mod commit {
                 &al.text,
                 al.aktenzeichen.as_ref().map(|s| s.as_str()),
             ),
+            DbChangeOp::CreateZugriff {
+                id, 
+                name, 
+                email,
+                typ,
+                grund,
+                datum,
+                land,
+                amtsgericht,
+                bezirk,
+                blatt,                
+            } => {
+                crate::db::create_zugriff(
+                    mount_point_write,
+                    id,
+                    name,
+                    email,
+                    typ,
+                    grund,
+                    datum,
+                    land,
+                    amtsgericht,
+                    bezirk,
+                    blatt,
+                )
+            },
             DbChangeOp::BenutzerSessionNeu {
                 email,
                 token,

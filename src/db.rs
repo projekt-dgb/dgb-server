@@ -94,6 +94,7 @@ pub async fn pull_db() -> Result<(), PullResponseError> {
     Ok(())
 }
 
+
 pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
     let mut open_flags = OpenFlags::empty();
 
@@ -108,13 +109,16 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
 
     let conn = Connection::open_with_flags(get_db_path(mount_point), open_flags)?;
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS zugriff_anfragen (
+        "CREATE TABLE IF NOT EXISTS zugriffe (
                 id              STRING PRIMARY KEY UNIQUE NOT NULL,
                 name            VARCHAR(255) NOT NULL,
                 email           VARCHAR(255) NOT NULL,
                 typ             VARCHAR(50) NOT NULL,
                 grund           STRING,
-                blaetter        STRING NOT NULL,
+                land            STRING NOT NULL,
+                amtsgericht     STRING NOT NULL,
+                bezirk          STRING NOT NULL,
+                blatt           STRING NOT NULL,
                 gewaehrt_von    STRING,
                 abgelehnt_von   STRING,
                 am              STRING
