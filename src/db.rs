@@ -102,8 +102,11 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
     open_flags.set(OpenFlags::SQLITE_OPEN_CREATE, true);
     open_flags.set(OpenFlags::SQLITE_OPEN_READ_WRITE, true);
 
-    let conn = Connection::open_with_flags(get_db_path(mount_point), open_flags)?;
+    if let Some(parent) = std::path::Path::new(&get_db_path(mount_point)).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
 
+    let conn = Connection::open_with_flags(get_db_path(mount_point), open_flags)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS zugriff_anfragen (
                 id              STRING PRIMARY KEY UNIQUE NOT NULL,
