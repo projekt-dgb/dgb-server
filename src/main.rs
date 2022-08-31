@@ -344,12 +344,12 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
                 .enable_all()
                 .build()
                 .map_err(|e| format!("tokio: {e}"))?;
-           
+
             runtime.block_on(async move {
                 crate::cli::pull_db_cli().await?;
                 Ok(())
             })
-        },
+        }
         Sync => {
             let _ = init_logger()?;
 
@@ -357,12 +357,12 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
                 .enable_all()
                 .build()
                 .map_err(|e| format!("tokio: {e}"))?;
-           
+
             runtime.block_on(async move {
                 crate::cli::pull().await?;
                 Ok(())
             })
-        },
+        }
         Suche { begriff } => {
             let suchergebnisse = crate::suche::suche_in_index(&begriff)?;
             println!("{:#?}", suchergebnisse);
@@ -449,7 +449,6 @@ async fn init(app_state: &AppState) -> Result<(), String> {
     use git2::Repository;
 
     if app_state.k8s_aktiv() && !app_state.sync_server() {
-    
         // Warte bis sync-server online ist
         let mut timeout = 0;
         while timeout < 120 {
@@ -470,7 +469,7 @@ async fn init(app_state: &AppState) -> Result<(), String> {
 
         println!("dgb-server: Datenbank erstellt");
         std::fs::write(get_db_path(MountPoint::Local), database_bytes)
-        .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
+            .map_err(|e| format!("Fehler in copy_database:\r\n{e}"))?;
 
         let data_local = get_data_dir(MountPoint::Local);
         let data_remote = format!("git://{sync_server_ip}:9418/");
@@ -481,21 +480,20 @@ async fn init(app_state: &AppState) -> Result<(), String> {
         })?;
         println!("dgb-server: ok, git clone erfolgreich");
     } else if app_state.k8s_aktiv() && app_state.sync_server() {
-        
-        println!("dgb-sync: erstelle Datenbank in {:?}", get_db_path(MountPoint::Remote));
+        println!(
+            "dgb-sync: erstelle Datenbank in {:?}",
+            get_db_path(MountPoint::Remote)
+        );
         crate::db::create_database(MountPoint::Remote)
-        .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
-        
+            .map_err(|e| format!("Fehler in create_database:\r\n{e}"))?;
+
         let data_dir = get_data_dir(MountPoint::Remote);
         println!("dgb-sync: erstelle /data dir in {data_dir:?}");
         let _ = std::fs::create_dir_all(&data_dir);
         println!("dgb-sync: initialisiere repo in {data_dir:?}");
         match Repository::open(&data_dir) {
             Ok(o) => o,
-            Err(_) => {
-                Repository::init(&data_dir)
-                .map_err(|e| format!("{e}"))?
-            }
+            Err(_) => Repository::init(&data_dir).map_err(|e| format!("{e}"))?,
         };
     } else {
         crate::db::create_database(MountPoint::Local)
@@ -513,32 +511,33 @@ async fn load_app_state() -> AppState {
             remote_mount: std::env::var("REMOTE_MOUNT").unwrap_or("/mnt/data/files".to_string()),
             k8s_aktiv: crate::k8s::is_running_in_k8s().await,
             smtp_config: SmtpConfig::default(),
-        }))
+        })),
     }
 }
 
 async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
-    
     use std::path::Path;
 
-    println!("dgb-sync: starte git daemon --base-path={}", get_data_dir(MountPoint::Remote));
+    println!(
+        "dgb-sync: starte git daemon --base-path={}",
+        get_data_dir(MountPoint::Remote)
+    );
 
     std::thread::spawn(move || {
-
         let git_daemon_ok_file = Path::new(&get_data_dir(MountPoint::Remote))
             .join(".git")
             .join("git-daemon-export-ok");
-    
+
         let _ = std::fs::write(&git_daemon_ok_file, &[])
-        .expect("could not create git-daemon-export-ok file");
+            .expect("could not create git-daemon-export-ok file");
 
         let _ = std::process::Command::new("git")
-        .arg("daemon")
-        .arg("--reuseaddr")
-        .arg(&format!("--base-path={}", get_data_dir(MountPoint::Remote)))
-        .arg(&get_data_dir(MountPoint::Remote))
-        .output()
-        .expect("could not spawm git daemon");
+            .arg("daemon")
+            .arg("--reuseaddr")
+            .arg(&format!("--base-path={}", get_data_dir(MountPoint::Remote)))
+            .arg(&get_data_dir(MountPoint::Remote))
+            .output()
+            .expect("could not spawm git daemon");
     });
 
     let k8s_peers = crate::k8s::k8s_get_peer_ips().await.unwrap_or_default();
@@ -548,7 +547,9 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
         println!("{}\t{}", p.name, p.ip);
     }
 
-    println!("\r\ndgb-sync: starte sync server (port 8081, endpoint = /commit, /db, /get-db /ping)");
+    println!(
+        "\r\ndgb-sync: starte sync server (port 8081, endpoint = /commit, /db, /get-db /ping)"
+    );
 
     HttpServer::new(move || {
         let json_cfg = JsonConfig::default()
@@ -584,8 +585,10 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
         HttpServer::new(move || {
             let app_state_clone = app_state_clone.clone();
 
-            let cors = actix_cors::Cors::permissive().allow_any_origin().supports_credentials();
-        
+            let cors = actix_cors::Cors::permissive()
+                .allow_any_origin()
+                .supports_credentials();
+
             App::new()
                 .app_data(json_cfg())
                 .app_data(actix_web::web::Data::new(app_state_clone))
@@ -618,14 +621,14 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
 
         HttpServer::new(move || {
             let app_state_clone = app_state_clone.clone();
-            
+
             App::new()
                 .app_data(json_cfg())
                 .app_data(actix_web::web::Data::new(app_state_clone))
                 .wrap(actix_web::middleware::Compress::default())
                 .service(crate::api::pull::pull)
                 .service(crate::api::pull::pull_db)
-            })
+        })
         .bind((ip, 8081))?
         .run()
         .await

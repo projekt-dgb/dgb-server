@@ -31,9 +31,9 @@ async fn get_benutzer_from_httpauth_inner(
     let token = match BearerAuth::extract(req).await {
         Ok(o) => o.token().to_string(),
         Err(e) => {
-            let cookie = req
-            .cookie("Authentication")
-            .ok_or(format!("Konnte Authentifizierungs-Token nicht aus Bearer auslesen"))?;
+            let cookie = req.cookie("Authentication").ok_or(format!(
+                "Konnte Authentifizierungs-Token nicht aus Bearer auslesen"
+            ))?;
             cookie.value().to_string()
         }
     };
@@ -76,15 +76,14 @@ pub(crate) async fn write_to_root_db(
         .await
         .map_err(|e| format!("Fehler beim Senden an /db: {e}"))?;
 
-    let o = res
-        .json::<CommitResponse>()
-        .await
-        .map_err(|e| format!("Konnte Änderung nicht an Sync-Server {k8s_sync_server_ip} senden: {e}"))?;
+    let o = res.json::<CommitResponse>().await.map_err(|e| {
+        format!("Konnte Änderung nicht an Sync-Server {k8s_sync_server_ip} senden: {e}")
+    })?;
 
     match o {
         CommitResponse::StatusOk(CommitResponseOk {}) => {}
         CommitResponse::StatusError(e) => {
-            result.insert(format!("{}",k8s_sync_server_ip), e);
+            result.insert(format!("{}", k8s_sync_server_ip), e);
         }
     }
 
@@ -110,8 +109,8 @@ pub(crate) async fn write_to_root_db(
 /// HTML für `/` und `/api` Seite
 pub mod index {
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
-    use serde_derive::{Serialize, Deserialize};
-    
+    use serde_derive::{Deserialize, Serialize};
+
     // Startseite
     #[get("/")]
     async fn status(_: HttpRequest) -> impl Responder {
@@ -162,7 +161,7 @@ pub mod index {
         amtsgericht: String,
         bezirk: String,
     }
-    
+
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct ZugriffJsonAnfrage {
         name: String,
@@ -216,11 +215,9 @@ pub mod index {
     struct ZugriffJsonGetBlaetterResponseOk {
         blaetter: Vec<String>,
     }
-    
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct ZugriffJsonAnfrageResponseOk {
 
-    }
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct ZugriffJsonAnfrageResponseOk {}
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct ZugriffJsonResponseError {
@@ -241,38 +238,44 @@ pub mod index {
         let response = zugriff_post_inner(&*json).await;
 
         HttpResponse::Ok()
-        .content_type("application/json")
-        .body(match response {
-            Ok(o) => serde_json::to_string_pretty(&ZugriffJsonResponse::Ok(o)).unwrap_or_default(),
-            Err(e) => serde_json::to_string_pretty(&ZugriffJsonResponse::Error(ZugriffJsonResponseError {
-                code: 500,
-                text: e.clone(),
-            })).unwrap_or_default(),
-        })
+            .content_type("application/json")
+            .body(match response {
+                Ok(o) => {
+                    serde_json::to_string_pretty(&ZugriffJsonResponse::Ok(o)).unwrap_or_default()
+                }
+                Err(e) => serde_json::to_string_pretty(&ZugriffJsonResponse::Error(
+                    ZugriffJsonResponseError {
+                        code: 500,
+                        text: e.clone(),
+                    },
+                ))
+                .unwrap_or_default(),
+            })
     }
 
     async fn zugriff_post_inner(json: &ZugriffJsonPost) -> Result<ZugriffJsonResponseOk, String> {
         use self::ZugriffJsonPost::*;
-        
+
         match json {
             GetAmtsgerichte(ga) => {
                 let amtsgerichte = crate::db::get_amtsgerichte_for_bundesland(&ga.land)?;
-                Ok(ZugriffJsonResponseOk::GetAmtsgerichte(ZugriffJsonGetAmtsgerichteResponseOk {
-                    amtsgerichte
-                }))
-            },
+                Ok(ZugriffJsonResponseOk::GetAmtsgerichte(
+                    ZugriffJsonGetAmtsgerichteResponseOk { amtsgerichte },
+                ))
+            }
             GetBezirke(gb) => {
                 let bezirke = crate::db::get_bezirke_for_amtsgericht(&gb.amtsgericht)?;
-                Ok(ZugriffJsonResponseOk::GetBezirke(ZugriffJsonGetBezirkeResponseOk {
-                    bezirke
-                }))
-            },
+                Ok(ZugriffJsonResponseOk::GetBezirke(
+                    ZugriffJsonGetBezirkeResponseOk { bezirke },
+                ))
+            }
             GetBlaetter(gb) => {
-                let blaetter = crate::db::get_blaetter_for_bezirk(&gb.land, &gb.amtsgericht, &gb.bezirk)?;
-                Ok(ZugriffJsonResponseOk::GetBlaetter(ZugriffJsonGetBlaetterResponseOk {
-                    blaetter
-                }))
-            },
+                let blaetter =
+                    crate::db::get_blaetter_for_bezirk(&gb.land, &gb.amtsgericht, &gb.bezirk)?;
+                Ok(ZugriffJsonResponseOk::GetBlaetter(
+                    ZugriffJsonGetBlaetterResponseOk { blaetter },
+                ))
+            }
             Anfrage(a) => {
                 if a.name.is_empty() {
                     return Err(format!("Kein Name angegeben"));
@@ -285,30 +288,35 @@ pub mod index {
                     "M-OD" => ZugriffTyp::Mitarbeiter,
                     "B-OD" => ZugriffTyp::Bearbeiter,
                     "SONSTIGE" => {
-                        if a.grund.trim().is_empty() { return Err("Kein Berechtigungsgrund angegeben für Typ \"Sonstiger Grund\"".to_string()); }
+                        if a.grund.trim().is_empty() {
+                            return Err(
+                                "Kein Berechtigungsgrund angegeben für Typ \"Sonstiger Grund\""
+                                    .to_string(),
+                            );
+                        }
                         ZugriffTyp::Sonstige
-                    },
-                    _ => { return Err(format!("Ungültiger \"typ\" angegeben")); },
+                    }
+                    _ => {
+                        return Err(format!("Ungültiger \"typ\" angegeben"));
+                    }
                 };
                 crate::db::create_zugriff();
-                Ok(ZugriffJsonResponseOk::Anfrage(ZugriffJsonAnfrageResponseOk { }))
-            },
+                Ok(ZugriffJsonResponseOk::Anfrage(
+                    ZugriffJsonAnfrageResponseOk {},
+                ))
+            }
         }
     }
 
     #[get("/konto.js")]
     async fn konto_js(_: HttpRequest) -> impl Responder {
-        
-        let path = std::path::Path::new(
-            env!("CARGO_MANIFEST_DIR")
-        ).join("web").join("konto.js");
-        
-        let s = std::fs::read_to_string(path)
-        .unwrap_or_default();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("web")
+            .join("konto.js");
 
-        HttpResponse::Ok()
-        .content_type("text/javascript")
-        .body(s)
+        let s = std::fs::read_to_string(path).unwrap_or_default();
+
+        HttpResponse::Ok().content_type("text/javascript").body(s)
     }
 
     // Seite mit API-Dokumentation
@@ -484,9 +492,8 @@ pub mod konto {
             }
         };
 
-        let konto_data_json = serde_json::to_string(&konto_data)
-        .unwrap_or_default();
-        
+        let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
+
         let html = include_str!("../web/konto.html")
             .replace(
                 "<!-- CSS -->",
@@ -536,7 +543,7 @@ pub mod commit {
         pull::PullResponse,
         upload::{commit_changes, sync_changes_to_disk, verify_signature, UploadChangeset},
     };
-    use crate::models::{get_data_dir, MountPoint, get_db_path};
+    use crate::models::{get_data_dir, get_db_path, MountPoint};
     use crate::{
         AboLoeschenArgs, AboNeuArgs, AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson,
         BezirkLoeschenArgs, BezirkNeuArgs,
@@ -707,10 +714,7 @@ pub mod commit {
     }
 
     #[post("/get-db")]
-    async fn get_db(
-        app_state: web::Data<AppState>,
-        _: HttpRequest,
-    ) -> HttpResponse {
+    async fn get_db(app_state: web::Data<AppState>, _: HttpRequest) -> HttpResponse {
         use lz4_flex::compress_prepend_size;
 
         if app_state.k8s_aktiv() && app_state.sync_server() {
@@ -719,16 +723,14 @@ pub mod commit {
                 Err(_) => return HttpResponse::NotFound().finish(),
             };
             let compressed = compress_prepend_size(&db_bytes);
-            HttpResponse::Ok()
-            .body(compressed)
+            HttpResponse::Ok().body(compressed)
         } else {
             let db_bytes = match std::fs::read(get_db_path(MountPoint::Local)) {
                 Ok(o) => o,
                 Err(_) => return HttpResponse::NotFound().finish(),
             };
             let compressed = compress_prepend_size(&db_bytes);
-            HttpResponse::Ok()
-            .body(compressed)
+            HttpResponse::Ok().body(compressed)
         }
     }
 
@@ -748,7 +750,6 @@ pub mod commit {
         change_op: &DbChangeOp,
         app_state: &AppState,
     ) -> Result<(), String> {
-
         let mount_point_write = if app_state.k8s_aktiv() && app_state.sync_server() {
             MountPoint::Remote
         } else {
@@ -794,8 +795,8 @@ pub mod commit {
                 al.aktenzeichen.as_ref().map(|s| s.as_str()),
             ),
             DbChangeOp::CreateZugriff {
-                id, 
-                name, 
+                id,
+                name,
                 email,
                 typ,
                 grund,
@@ -803,22 +804,20 @@ pub mod commit {
                 land,
                 amtsgericht,
                 bezirk,
-                blatt,                
-            } => {
-                crate::db::create_zugriff(
-                    mount_point_write,
-                    id,
-                    name,
-                    email,
-                    typ,
-                    grund,
-                    datum,
-                    land,
-                    amtsgericht,
-                    bezirk,
-                    blatt,
-                )
-            },
+                blatt,
+            } => crate::db::create_zugriff(
+                mount_point_write,
+                id,
+                name,
+                email,
+                typ,
+                grund,
+                datum,
+                land,
+                amtsgericht,
+                bezirk,
+                blatt,
+            ),
             DbChangeOp::BenutzerSessionNeu {
                 email,
                 token,
@@ -927,20 +926,21 @@ pub mod pull {
         let repo = match Repository::open(&local_path) {
             Ok(o) => o,
             Err(_) => {
-                Repository::init(&local_path)
-                .map_err(|e| response_err(501, format!("{e}")))?
+                Repository::init(&local_path).map_err(|e| response_err(501, format!("{e}")))?
             }
         };
 
-        let sync_server_ip = crate::k8s::get_sync_server_ip().await
-        .map_err(|e| response_err(501, format!("Konnte Sync-Server nicht finden: {e}")))?;
-        
+        let sync_server_ip = crate::k8s::get_sync_server_ip()
+            .await
+            .map_err(|e| response_err(501, format!("Konnte Sync-Server nicht finden: {e}")))?;
+
         let data_remote = format!("git://{sync_server_ip}:9418/");
         repo.remote_add_fetch("origin", &data_remote)
             .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
 
-        let mut remote = repo.find_remote("origin")
-        .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
+        let mut remote = repo
+            .find_remote("origin")
+            .map_err(|e| response_err(501, format!("git_clone({data_remote}): {e}")))?;
 
         remote
             .fetch(&["main"], None, None)
@@ -960,18 +960,14 @@ pub mod pull {
 
     async fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
         let response_ok = || {
-            HttpResponse::Ok()
-            .content_type("application/json")
-            .body(
+            HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string(&PullResponse::StatusOk(PullResponseOk {}))
                     .unwrap_or_default(),
             )
         };
 
         let response_err = |code: usize, text: String| {
-            HttpResponse::Ok()
-            .content_type("application/json")
-            .body(
+            HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string(&PullResponse::StatusError(PullResponseError { code, text }))
                     .unwrap_or_default(),
             )
@@ -981,8 +977,9 @@ pub mod pull {
             return Ok(response_ok());
         }
 
-        let remote_db_bytes = crate::db::get_db_bytes().await
-        .map_err(|e| response_err(500, format!("get_db_bytes: {e}")))?;
+        let remote_db_bytes = crate::db::get_db_bytes()
+            .await
+            .map_err(|e| response_err(500, format!("get_db_bytes: {e}")))?;
 
         let local_path = Path::new(&get_db_path(MountPoint::Local)).to_path_buf();
         if let Some(parent) = local_path.parent() {

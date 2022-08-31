@@ -2,21 +2,20 @@
 
 use crate::{
     api::pull::{PullResponse, PullResponseError},
-    models::{get_db_path, AbonnementInfo, BenutzerInfo, get_data_dir, PdfFile},
+    models::{get_data_dir, get_db_path, AbonnementInfo, BenutzerInfo, PdfFile},
     MountPoint,
 };
 use chrono::{DateTime, Utc};
 use git2::Repository;
+use lz4_flex::decompress_size_prepended;
 use rusqlite::{Connection, OpenFlags};
 use serde_derive::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use lz4_flex::decompress_size_prepended;
 
 pub type GemarkungsBezirke = Vec<(String, String, String)>;
 const PASSWORD_LEN: usize = 128;
 
 pub async fn get_db_bytes() -> Result<Vec<u8>, String> {
-
     let ip = crate::k8s::get_sync_server_ip().await?;
     let client = reqwest::Client::new();
     let res = client
@@ -24,16 +23,20 @@ pub async fn get_db_bytes() -> Result<Vec<u8>, String> {
         .send()
         .await
         .map_err(|e| format!("Konnte Sync-Server nicht erreichen: {e}"))?;
-    
+
     if res.status() != reqwest::StatusCode::OK {
-        return Err(format!("Konnte Datenbank nicht von Sync-Server erhalten: 404"));
+        return Err(format!(
+            "Konnte Datenbank nicht von Sync-Server erhalten: 404"
+        ));
     }
 
-    let bytes = res.bytes().await
-    .map_err(|e| format!("Konnte Datenbank nicht synchronisieren: {e}"))?;
-    
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| format!("Konnte Datenbank nicht synchronisieren: {e}"))?;
+
     let bytes = decompress_size_prepended(&bytes)
-    .map_err(|e| format!("Fehler beim Dekomprimieren: {e}"))?;
+        .map_err(|e| format!("Fehler beim Dekomprimieren: {e}"))?;
 
     Ok(bytes)
 }
@@ -93,7 +96,6 @@ pub async fn pull_db() -> Result<(), PullResponseError> {
 
     Ok(())
 }
-
 
 pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
     let mut open_flags = OpenFlags::empty();
@@ -185,13 +187,14 @@ pub fn create_gemarkung(
     amtsgericht: &str,
     bezirk: &str,
 ) -> Result<(), String> {
-
     let land = match Bundesland::from_code(land) {
         Some(s) => s,
         None => match Bundesland::from_string(land) {
             Some(s) => s,
-            None => { return Err(format!("Ungültiges Bundesland")); },
-        }
+            None => {
+                return Err(format!("Ungültiges Bundesland"));
+            }
+        },
     };
 
     let conn = Connection::open(get_db_path(mount_point))
@@ -202,7 +205,10 @@ pub fn create_gemarkung(
         rusqlite::params![land.into_code(), amtsgericht, bezirk],
     )
     .map_err(|e| {
-        format!("Fehler beim Einfügen von {}/{amtsgericht}/{bezirk} in Datenbank: {e}", land.into_str())
+        format!(
+            "Fehler beim Einfügen von {}/{amtsgericht}/{bezirk} in Datenbank: {e}",
+            land.into_str()
+        )
     })?;
 
     Ok(())
@@ -235,7 +241,6 @@ pub fn get_gemarkungen() -> Result<GemarkungsBezirke, String> {
     Ok(bz)
 }
 
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum Bundesland {
     BadenWuerttemberg,
@@ -257,7 +262,6 @@ pub enum Bundesland {
 }
 
 impl Bundesland {
-
     pub fn into_code(&self) -> &'static str {
         use self::Bundesland::*;
         match self {
@@ -350,18 +354,16 @@ impl Bundesland {
 }
 
 pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, String> {
-
     let bundesland_clean = match bundesland {
-        "ALLE_BUNDESLAENDER" => return {
-            Ok(get_gemarkungen()?
-            .into_iter()
-            .map(|(_, ag, _)| ag.clone())
-            .collect())
-        },
-        other => {
-            Bundesland::from_code(other)
-            .ok_or(format!("Ungültige Bundesland-ID"))?
-        },
+        "ALLE_BUNDESLAENDER" => {
+            return {
+                Ok(get_gemarkungen()?
+                    .into_iter()
+                    .map(|(_, ag, _)| ag.clone())
+                    .collect())
+            }
+        }
+        other => Bundesland::from_code(other).ok_or(format!("Ungültige Bundesland-ID"))?,
     };
 
     let conn = Connection::open(get_db_path(MountPoint::Local))
@@ -370,74 +372,82 @@ pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, 
     let mut stmt = conn
         .prepare("SELECT amtsgericht FROM bezirke where land = ?1")
         .map_err(|_| format!("Fehler beim Auslesen der Bezirke"))?;
-        
+
     let bezirke = stmt
         .query_map([bundesland_clean.into_code()], |row| {
-            Ok((
-                row.get::<usize, String>(0)?,
-            ))
+            Ok((row.get::<usize, String>(0)?,))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     Ok(bezirke
-    .into_iter()
-    .filter_map(|b| Some(b.ok()?.0))
-    .collect())
+        .into_iter()
+        .filter_map(|b| Some(b.ok()?.0))
+        .collect())
 }
 
 pub fn get_bezirke_for_amtsgericht(amtsgericht: &str) -> Result<Vec<String>, String> {
-
     let amtsgericht_clean = match amtsgericht {
-        "ALLE_AMTSGERICHTE" => return {
-            Ok(get_gemarkungen()?
-            .into_iter()
-            .map(|(_, _, bezirk)| bezirk.clone())
-            .collect())
-        },
+        "ALLE_AMTSGERICHTE" => {
+            return {
+                Ok(get_gemarkungen()?
+                    .into_iter()
+                    .map(|(_, _, bezirk)| bezirk.clone())
+                    .collect())
+            }
+        }
         other => other,
     };
 
     let conn = Connection::open(get_db_path(MountPoint::Local))
-    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let mut stmt = conn
         .prepare("SELECT bezirk FROM bezirke where amtsgericht = ?1")
         .map_err(|_| format!("Fehler beim Auslesen der Bezirke"))?;
-        
+
     let bezirke = stmt
         .query_map([amtsgericht_clean], |row| {
-            Ok((
-                row.get::<usize, String>(0)?,
-            ))
+            Ok((row.get::<usize, String>(0)?,))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     Ok(bezirke
-    .into_iter()
-    .filter_map(|b| Some(b.ok()?.0))
-    .collect())
+        .into_iter()
+        .filter_map(|b| Some(b.ok()?.0))
+        .collect())
 }
 
-pub fn get_blaetter_for_bezirk(land: &str, amtsgericht: &str, bezirk: &str) -> Result<Vec<String>, String> {
+pub fn get_blaetter_for_bezirk(
+    land: &str,
+    amtsgericht: &str,
+    bezirk: &str,
+) -> Result<Vec<String>, String> {
     use std::path::Path;
     let land = match Bundesland::from_code(land) {
         Some(s) => s,
         None => match Bundesland::from_string(land) {
             Some(s) => s,
-            None => { return Err(format!("Ungültiges Bundesland")); },
-        }
+            None => {
+                return Err(format!("Ungültiges Bundesland"));
+            }
+        },
     };
-    let folder = Path::new(&get_data_dir(MountPoint::Local)).join(land.into_str()).join(amtsgericht).join(bezirk);
+    let folder = Path::new(&get_data_dir(MountPoint::Local))
+        .join(land.into_str())
+        .join(amtsgericht)
+        .join(bezirk);
     if !folder.exists() || !folder.is_dir() {
         return Ok(Vec::new());
     }
-    
+
     let paths = std::fs::read_dir(folder).map_err(|e| format!("{e}"))?;
     let mut blaetter = Vec::new();
     for path in paths {
         let path = path.map_err(|e| format!("{e}"))?.path();
-        let file = std::fs::read_to_string(path).map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;        
-        let parsed: PdfFile = serde_json::from_str(&file).map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;
+        let file = std::fs::read_to_string(path)
+            .map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;
+        let parsed: PdfFile = serde_json::from_str(&file)
+            .map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;
         blaetter.push(parsed.analysiert.titelblatt.blatt.to_string());
     }
 
@@ -450,13 +460,14 @@ pub fn delete_gemarkung(
     amtsgericht: &str,
     bezirk: &str,
 ) -> Result<(), String> {
-
     let land = match Bundesland::from_code(land) {
         Some(s) => s,
         None => match Bundesland::from_string(land) {
             Some(s) => s,
-            None => { return Err(format!("Ungültiges Bundesland")); },
-        }
+            None => {
+                return Err(format!("Ungültiges Bundesland"));
+            }
+        },
     };
 
     let conn = Connection::open(get_db_path(mount_point))
@@ -467,7 +478,10 @@ pub fn delete_gemarkung(
         rusqlite::params![land.into_code(), amtsgericht, bezirk],
     )
     .map_err(|e| {
-        format!("Fehler beim Löschen von {}/{amtsgericht}/{bezirk} in Datenbank: {e}", land.into_str())
+        format!(
+            "Fehler beim Löschen von {}/{amtsgericht}/{bezirk} in Datenbank: {e}",
+            land.into_str()
+        )
     })?;
 
     Ok(())
@@ -652,7 +666,6 @@ pub struct KontoTabelle {
 }
 
 pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String> {
-    
     let mut data = KontoData::default();
     data.kontotyp = benutzer_info.rechte.clone();
 
@@ -661,10 +674,10 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
 
     match benutzer_info.rechte.as_str() {
         "admin" => {
-
-            // Zugriffe 
+            // Zugriffe
             let mut stmt = conn
-            .prepare("
+                .prepare(
+                    "
                 SELECT 
                     id,
                     name,
@@ -676,57 +689,68 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                     abgelehnt_von,
                     am
                 FROM zugriff_anfragen 
-            ")
-            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 1"))?;
+            ",
+                )
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 1"))?;
 
             let zugriffe = stmt
-            .query_map(rusqlite::params![], |row| {
-                Ok((
-                    row.get::<usize, String>(0)?, 
-                    row.get::<usize, String>(1)?,
-                    row.get::<usize, String>(2)?,
-                    row.get::<usize, String>(3)?,
-                    row.get::<usize, Option<String>>(4)?,
-                    row.get::<usize, String>(5)?,
-                    row.get::<usize, Option<String>>(6)?,
-                    row.get::<usize, Option<String>>(7)?,
-                    row.get::<usize, Option<String>>(8)?,
-                ))
-            })
-            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-            .collect::<Vec<_>>();
+                .query_map(rusqlite::params![], |row| {
+                    Ok((
+                        row.get::<usize, String>(0)?,
+                        row.get::<usize, String>(1)?,
+                        row.get::<usize, String>(2)?,
+                        row.get::<usize, String>(3)?,
+                        row.get::<usize, Option<String>>(4)?,
+                        row.get::<usize, String>(5)?,
+                        row.get::<usize, Option<String>>(6)?,
+                        row.get::<usize, Option<String>>(7)?,
+                        row.get::<usize, Option<String>>(8)?,
+                    ))
+                })
+                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+                .collect::<Vec<_>>();
 
-            data.data.insert("zugriffe".to_string(), KontoTabelle {
-                spalten: vec![
-                    "id".to_string(),
-                    "name".to_string(),
-                    "email".to_string(),
-                    "typ".to_string(),
-                    "grund".to_string(),
-                    "blaetter".to_string(),
-                    "gewaehrt_von".to_string(),
-                    "abgelehnt_von".to_string(),
-                    "am".to_string(),
-                ],
-                daten: zugriffe.into_iter().filter_map(|row| {
-                    let row = row.ok()?;
-                    Some((row.0.clone(), vec![
-                        row.0.clone(), 
-                        row.1.clone(), 
-                        row.2.clone(),
-                        row.3.clone(),
-                        row.4.clone().unwrap_or_default(),
-                        row.5.clone(),
-                        row.6.clone().unwrap_or_default(),
-                        row.7.clone().unwrap_or_default(),
-                        row.8.clone().unwrap_or_default(),
-                    ]))
-                }).collect(),
-            });
+            data.data.insert(
+                "zugriffe".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "id".to_string(),
+                        "name".to_string(),
+                        "email".to_string(),
+                        "typ".to_string(),
+                        "grund".to_string(),
+                        "blaetter".to_string(),
+                        "gewaehrt_von".to_string(),
+                        "abgelehnt_von".to_string(),
+                        "am".to_string(),
+                    ],
+                    daten: zugriffe
+                        .into_iter()
+                        .filter_map(|row| {
+                            let row = row.ok()?;
+                            Some((
+                                row.0.clone(),
+                                vec![
+                                    row.0.clone(),
+                                    row.1.clone(),
+                                    row.2.clone(),
+                                    row.3.clone(),
+                                    row.4.clone().unwrap_or_default(),
+                                    row.5.clone(),
+                                    row.6.clone().unwrap_or_default(),
+                                    row.7.clone().unwrap_or_default(),
+                                    row.8.clone().unwrap_or_default(),
+                                ],
+                            ))
+                        })
+                        .collect(),
+                },
+            );
 
             // Benutzer
             let mut stmt = conn
-            .prepare("
+                .prepare(
+                    "
                 SELECT 
                     benutzer.name, 
                     benutzer.email, 
@@ -736,95 +760,115 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 FROM benutzer 
                 LEFT JOIN publickeys
                 ON publickeys.email = benutzer.email
-            ")
-            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 2"))?;
+            ",
+                )
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 2"))?;
 
             let benutzer = stmt
-            .query_map(rusqlite::params![], |row| {
-                Ok((
-                    row.get::<usize, String>(0)?, 
-                    row.get::<usize, String>(1)?,
-                    row.get::<usize, String>(2)?,
-                    row.get::<usize, Option<String>>(3)?,
-                    row.get::<usize, Option<String>>(4)?,
-                ))
-            })
-            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-            .collect::<Vec<_>>();
+                .query_map(rusqlite::params![], |row| {
+                    Ok((
+                        row.get::<usize, String>(0)?,
+                        row.get::<usize, String>(1)?,
+                        row.get::<usize, String>(2)?,
+                        row.get::<usize, Option<String>>(3)?,
+                        row.get::<usize, Option<String>>(4)?,
+                    ))
+                })
+                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+                .collect::<Vec<_>>();
 
-            data.data.insert("benutzer".to_string(), KontoTabelle {
-                spalten: vec![
-                    "name".to_string(),
-                    "email".to_string(),
-                    "rechte".to_string(),
-                    "publickeys.fingerprint".to_string(),
-                    "publickeys.pubkey".to_string(),
-                ],
-                daten: benutzer.into_iter().filter_map(|row| {
-                    let row = row.ok()?;
-                    Some((row.1.clone(), vec![
-                        row.0.clone(), 
-                        row.1.clone(), 
-                        row.2.clone(),
-                        row.3.clone().unwrap_or_default(),
-                        row.4.clone().unwrap_or_default(),
-                    ]))
-                }).collect(),
-            });
+            data.data.insert(
+                "benutzer".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "name".to_string(),
+                        "email".to_string(),
+                        "rechte".to_string(),
+                        "publickeys.fingerprint".to_string(),
+                        "publickeys.pubkey".to_string(),
+                    ],
+                    daten: benutzer
+                        .into_iter()
+                        .filter_map(|row| {
+                            let row = row.ok()?;
+                            Some((
+                                row.1.clone(),
+                                vec![
+                                    row.0.clone(),
+                                    row.1.clone(),
+                                    row.2.clone(),
+                                    row.3.clone().unwrap_or_default(),
+                                    row.4.clone().unwrap_or_default(),
+                                ],
+                            ))
+                        })
+                        .collect(),
+                },
+            );
 
             let mut stmt = conn
-            .prepare("SELECT land, amtsgericht, bezirk FROM bezirke")
-            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 3"))?;
+                .prepare("SELECT land, amtsgericht, bezirk FROM bezirke")
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 3"))?;
 
             let bezirke = stmt
-            .query_map(rusqlite::params![], |row| {
-                Ok((
-                    row.get::<usize, String>(0)?, 
-                    row.get::<usize, String>(1)?,
-                    row.get::<usize, String>(2)?,
-                ))
-            })
-            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-            .collect::<Vec<_>>();
+                .query_map(rusqlite::params![], |row| {
+                    Ok((
+                        row.get::<usize, String>(0)?,
+                        row.get::<usize, String>(1)?,
+                        row.get::<usize, String>(2)?,
+                    ))
+                })
+                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+                .collect::<Vec<_>>();
 
-            data.data.insert("bezirke".to_string(), KontoTabelle {
-                spalten: vec![
-                    "land".to_string(),
-                    "amtsgericht".to_string(),
-                    "bezirk".to_string(),
-                ],
-                daten: bezirke.into_iter().enumerate().filter_map(|(i, row)| {
-                    let row = row.ok()?;
-                    let bundesland = Bundesland::from_code(&row.0)?.into_str().to_string();
-                    Some((format!("{i}"), vec![
-                        bundesland, 
-                        row.1.clone(), 
-                        row.2.clone(),
-                    ]))
-                }).collect(),
-            });
+            data.data.insert(
+                "bezirke".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "land".to_string(),
+                        "amtsgericht".to_string(),
+                        "bezirk".to_string(),
+                    ],
+                    daten: bezirke
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(i, row)| {
+                            let row = row.ok()?;
+                            let bundesland = Bundesland::from_code(&row.0)?.into_str().to_string();
+                            Some((
+                                format!("{i}"),
+                                vec![bundesland, row.1.clone(), row.2.clone()],
+                            ))
+                        })
+                        .collect(),
+                },
+            );
 
             let aenderungen = crate::db::get_aenderungen(AenderungFilter::GetLast(500));
-            data.data.insert("aenderungen".to_string(), KontoTabelle {
-                spalten: vec![
-                    "id".to_string(),
-                    "name".to_string(),
-                    "email".to_string(),
-                    "zeit-sec".to_string(),
-                    "zeit-offset".to_string(),
-                    "zeit-tz".to_string(),
-                    "zusammenfassung".to_string(),
-                ],
-                daten: aenderungen
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, a)| (i.to_string(), a))
-                    .collect(),
-            });
+            data.data.insert(
+                "aenderungen".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "id".to_string(),
+                        "name".to_string(),
+                        "email".to_string(),
+                        "zeit-sec".to_string(),
+                        "zeit-offset".to_string(),
+                        "zeit-tz".to_string(),
+                        "zusammenfassung".to_string(),
+                    ],
+                    daten: aenderungen
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, a)| (i.to_string(), a))
+                        .collect(),
+                },
+            );
 
             // Benutzer
             let mut stmt = conn
-            .prepare("
+                .prepare(
+                    "
                 SELECT 
                     benutzer.name, 
                     benutzer.email, 
@@ -835,66 +879,81 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 LEFT JOIN publickeys
                 ON publickeys.email = benutzer.email
                 WHERE benutzer.id = ?1
-            ")
-            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
+            ",
+                )
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
 
             let benutzer = stmt
-            .query_map(rusqlite::params![benutzer_info.id], |row| {
-                Ok((
-                    row.get::<usize, String>(0)?, 
-                    row.get::<usize, String>(1)?,
-                    row.get::<usize, String>(2)?,
-                    row.get::<usize, Option<String>>(3)?,
-                    row.get::<usize, Option<String>>(4)?,
-                ))
-            })
-            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-            .collect::<Vec<_>>();
+                .query_map(rusqlite::params![benutzer_info.id], |row| {
+                    Ok((
+                        row.get::<usize, String>(0)?,
+                        row.get::<usize, String>(1)?,
+                        row.get::<usize, String>(2)?,
+                        row.get::<usize, Option<String>>(3)?,
+                        row.get::<usize, Option<String>>(4)?,
+                    ))
+                })
+                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+                .collect::<Vec<_>>();
 
-            data.data.insert("meine-kontodaten".to_string(), KontoTabelle {
-                spalten: vec![
-                    "name".to_string(),
-                    "email".to_string(),
-                    "rechte".to_string(),
-                    "publickeys.fingerprint".to_string(),
-                    "publickeys.pubkey".to_string(),
-                ],
-                daten: benutzer.into_iter().filter_map(|row| {
-                    let row = row.ok()?;
-                    Some((row.1.clone(), vec![
-                        row.0.clone(), 
-                        row.1.clone(), 
-                        row.2.clone(),
-                        row.3.clone().unwrap_or_default(),
-                        row.4.clone().unwrap_or_default(),
-                    ]))
-                }).collect(),
-            });
+            data.data.insert(
+                "meine-kontodaten".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "name".to_string(),
+                        "email".to_string(),
+                        "rechte".to_string(),
+                        "publickeys.fingerprint".to_string(),
+                        "publickeys.pubkey".to_string(),
+                    ],
+                    daten: benutzer
+                        .into_iter()
+                        .filter_map(|row| {
+                            let row = row.ok()?;
+                            Some((
+                                row.1.clone(),
+                                vec![
+                                    row.0.clone(),
+                                    row.1.clone(),
+                                    row.2.clone(),
+                                    row.3.clone().unwrap_or_default(),
+                                    row.4.clone().unwrap_or_default(),
+                                ],
+                            ))
+                        })
+                        .collect(),
+                },
+            );
         }
         "bearbeiter" => {
-
-            let aenderungen = crate::db::get_aenderungen(AenderungFilter::FilterEmail(benutzer_info.email.clone()));
-            data.data.insert("meine-aenderungen".to_string(), KontoTabelle {
-                spalten: vec![
-                    "id".to_string(),
-                    "name".to_string(),
-                    "email".to_string(),
-                    "zeit-sec".to_string(),
-                    "zeit-offset".to_string(),
-                    "zeit-tz".to_string(),
-                    "zusammenfassung".to_string(),
-                ],
-                daten: aenderungen
-                    .into_iter()
-                    .filter(|a| a[2] == benutzer_info.email)
-                    .enumerate()
-                    .map(|(i, a)| (i.to_string(), a))
-                    .collect(),
-            });
+            let aenderungen = crate::db::get_aenderungen(AenderungFilter::FilterEmail(
+                benutzer_info.email.clone(),
+            ));
+            data.data.insert(
+                "meine-aenderungen".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "id".to_string(),
+                        "name".to_string(),
+                        "email".to_string(),
+                        "zeit-sec".to_string(),
+                        "zeit-offset".to_string(),
+                        "zeit-tz".to_string(),
+                        "zusammenfassung".to_string(),
+                    ],
+                    daten: aenderungen
+                        .into_iter()
+                        .filter(|a| a[2] == benutzer_info.email)
+                        .enumerate()
+                        .map(|(i, a)| (i.to_string(), a))
+                        .collect(),
+                },
+            );
 
             // Benutzer
             let mut stmt = conn
-            .prepare("
+                .prepare(
+                    "
                 SELECT 
                     benutzer.name, 
                     benutzer.email, 
@@ -905,83 +964,98 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 LEFT JOIN publickeys
                 ON publickeys.email = benutzer.email
                 WHERE benutzer.id = ?1
-            ")
-            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
+            ",
+                )
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
 
             let benutzer = stmt
-            .query_map(rusqlite::params![benutzer_info.id], |row| {
-                Ok((
-                    row.get::<usize, String>(0)?, 
-                    row.get::<usize, String>(1)?,
-                    row.get::<usize, String>(2)?,
-                    row.get::<usize, Option<String>>(3)?,
-                    row.get::<usize, Option<String>>(4)?,
-                ))
-            })
-            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-            .collect::<Vec<_>>();
+                .query_map(rusqlite::params![benutzer_info.id], |row| {
+                    Ok((
+                        row.get::<usize, String>(0)?,
+                        row.get::<usize, String>(1)?,
+                        row.get::<usize, String>(2)?,
+                        row.get::<usize, Option<String>>(3)?,
+                        row.get::<usize, Option<String>>(4)?,
+                    ))
+                })
+                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+                .collect::<Vec<_>>();
 
-            data.data.insert("meine-kontodaten".to_string(), KontoTabelle {
-                spalten: vec![
-                    "name".to_string(),
-                    "email".to_string(),
-                    "rechte".to_string(),
-                    "publickeys.fingerprint".to_string(),
-                    "publickeys.pubkey".to_string(),
-                ],
-                daten: benutzer.into_iter().filter_map(|row| {
-                    let row = row.ok()?;
-                    Some((row.1.clone(), vec![
-                        row.0.clone(), 
-                        row.1.clone(), 
-                        row.2.clone(),
-                        row.3.clone().unwrap_or_default(),
-                        row.4.clone().unwrap_or_default(),
-                    ]))
-                }).collect(),
-            });
-
-        },
+            data.data.insert(
+                "meine-kontodaten".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "name".to_string(),
+                        "email".to_string(),
+                        "rechte".to_string(),
+                        "publickeys.fingerprint".to_string(),
+                        "publickeys.pubkey".to_string(),
+                    ],
+                    daten: benutzer
+                        .into_iter()
+                        .filter_map(|row| {
+                            let row = row.ok()?;
+                            Some((
+                                row.1.clone(),
+                                vec![
+                                    row.0.clone(),
+                                    row.1.clone(),
+                                    row.2.clone(),
+                                    row.3.clone().unwrap_or_default(),
+                                    row.4.clone().unwrap_or_default(),
+                                ],
+                            ))
+                        })
+                        .collect(),
+                },
+            );
+        }
         "gast" => {
-
             let mut stmt = conn
-            .prepare("
+                .prepare(
+                    "
                 SELECT 
                     benutzer.name, 
                     benutzer.email, 
                     benutzer.rechte, 
                 FROM benutzer 
                 WHERE benutzer.id = ?1
-            ")
-            .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 5"))?;
+            ",
+                )
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 5"))?;
 
             let benutzer = stmt
-            .query_map(rusqlite::params![benutzer_info.id], |row| {
-                Ok((
-                    row.get::<usize, String>(0)?, 
-                    row.get::<usize, String>(1)?,
-                    row.get::<usize, String>(2)?
-                ))
-            })
-            .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-            .collect::<Vec<_>>();
+                .query_map(rusqlite::params![benutzer_info.id], |row| {
+                    Ok((
+                        row.get::<usize, String>(0)?,
+                        row.get::<usize, String>(1)?,
+                        row.get::<usize, String>(2)?,
+                    ))
+                })
+                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+                .collect::<Vec<_>>();
 
-            data.data.insert("meine-kontodaten".to_string(), KontoTabelle {
-                spalten: vec![
-                    "name".to_string(),
-                    "email".to_string(),
-                    "rechte".to_string(),
-                ],
-                daten: benutzer.into_iter().filter_map(|row| {
-                    let row = row.ok()?;
-                    Some((row.1.clone(), vec![
-                        row.0.clone(), 
-                        row.1.clone(), 
-                        row.2.clone(),
-                    ]))
-                }).collect(),
-            });
-        },
+            data.data.insert(
+                "meine-kontodaten".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "name".to_string(),
+                        "email".to_string(),
+                        "rechte".to_string(),
+                    ],
+                    daten: benutzer
+                        .into_iter()
+                        .filter_map(|row| {
+                            let row = row.ok()?;
+                            Some((
+                                row.1.clone(),
+                                vec![row.0.clone(), row.1.clone(), row.2.clone()],
+                            ))
+                        })
+                        .collect(),
+                },
+            );
+        }
         _ => {}
     }
 
@@ -995,17 +1069,16 @@ pub enum AenderungFilter {
 }
 
 pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
-
     let repo = match Repository::open(get_data_dir(MountPoint::Local)) {
         Ok(s) => s,
         Err(e) => return Vec::new(),
     };
 
     let head = repo
-    .head()
-    .ok()
-    .and_then(|c| c.target())
-    .and_then(|head_target| repo.find_commit(head_target).ok());
+        .head()
+        .ok()
+        .and_then(|c| c.target())
+        .and_then(|head_target| repo.find_commit(head_target).ok());
 
     let head = match head {
         Some(s) => s,
@@ -1023,14 +1096,12 @@ pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
     ];
 
     let commits = match filter {
-        AenderungFilter::GetLast(i) => { 
-            let mut v = if i == 0  {
-                Vec::new()
-            } else {
-                vec![commits]
-            };
+        AenderungFilter::GetLast(i) => {
+            let mut v = if i == 0 { Vec::new() } else { vec![commits] };
 
-            if i <= 1 { return v; }
+            if i <= 1 {
+                return v;
+            }
 
             v.extend(head.parents().take(i - 1).map(|c| {
                 vec![
@@ -1045,7 +1116,7 @@ pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
             }));
 
             v
-        },
+        }
         AenderungFilter::FilterEmail(s) => {
             let mut v = if s == commits[2] {
                 vec![commits]
@@ -1079,7 +1150,6 @@ pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
 }
 
 pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
-
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -1088,11 +1158,11 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
         .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 6"))?;
 
     let tokens = stmt
-    .query_map(rusqlite::params![token], |row| {
-        Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(1)?))
-    })
-    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-    .collect::<Vec<_>>();
+        .query_map(rusqlite::params![token], |row| {
+            Ok((row.get::<usize, i32>(0)?, row.get::<usize, String>(1)?))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
+        .collect::<Vec<_>>();
 
     let result = tokens.get(0).and_then(|t| {
         t.as_ref()
@@ -1213,15 +1283,16 @@ pub fn check_password(
     let now = Utc::now();
 
     for t in tokens {
-        
-        let t = t.as_ref().ok()
-        .and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)));
-        
+        let t = t
+            .as_ref()
+            .ok()
+            .and_then(|(t, g)| Some((t, DateTime::parse_from_rfc3339(&g).ok()?)));
+
         let (token, gueltig_bis) = match t {
             Some((t, g)) => (t, g),
             None => continue,
         };
-        
+
         if !(now > gueltig_bis) {
             return Ok((info, token.clone(), gueltig_bis.into()));
         }
