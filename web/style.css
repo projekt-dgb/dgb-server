@@ -127,3 +127,17 @@ hr {
 form div {
     margin-bottom: 10px;
 }
+
+#sidebar {
+    padding-top: 30px;
+    height: 100%;
+    min-height: 500px;
+    display: block;
+    float: left;
+    width: 200px;
+}
+
+#main {
+    display: block;
+    float: left;
+}

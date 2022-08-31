@@ -142,7 +142,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sessions (
-                benutzer        INTEGER PRIMARY KEY,
+                benutzer        INTEGER,
                 token           VARCHAR(1024) UNIQUE NOT NULL,
                 gueltig_bis     VARCHAR(255) NOT NULL
         )",
