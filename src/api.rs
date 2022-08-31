@@ -110,6 +110,7 @@ pub(crate) async fn write_to_root_db(
 pub mod index {
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
+    use crate::AppState;
 
     // Startseite
     #[get("/")]
@@ -225,17 +226,34 @@ pub mod index {
         text: String,
     }
 
-    enum ZugriffTyp {
+    #[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
+    pub enum ZugriffTyp {
+        #[serde(rename = "gast")]
         Gast,
+        #[serde(rename = "mitarbeiter")]
         Mitarbeiter,
+        #[serde(rename = "bearbeiter")]
         Bearbeiter,
+        #[serde(rename = "sonstige")]
         Sonstige,
+    }
+
+    impl ZugriffTyp {
+        pub fn to_string(&self) -> String {
+            serde_json::to_string(self).unwrap_or_default()
+        }
+        pub fn from_str(s: &str) -> Option<Self> {
+            serde_json::from_str(s).ok()
+        }
     }
 
     // Login-Seite
     #[post("/zugriff")]
-    pub async fn zugriff_post(json: web::Json<ZugriffJsonPost>, _: HttpRequest) -> impl Responder {
-        let response = zugriff_post_inner(&*json).await;
+    pub async fn zugriff_post(app_state: web::Data<AppState>, json: web::Json<ZugriffJsonPost>, _: HttpRequest) -> impl Responder {
+        let response = zugriff_post_inner(
+            &*app_state, 
+            &*json
+        ).await;
 
         HttpResponse::Ok()
             .content_type("application/json")
@@ -253,7 +271,7 @@ pub mod index {
             })
     }
 
-    async fn zugriff_post_inner(json: &ZugriffJsonPost) -> Result<ZugriffJsonResponseOk, String> {
+    async fn zugriff_post_inner(app_state: &AppState, json: &ZugriffJsonPost) -> Result<ZugriffJsonResponseOk, String> {
         use self::ZugriffJsonPost::*;
 
         match json {
@@ -277,6 +295,8 @@ pub mod index {
                 ))
             }
             Anfrage(a) => {
+                use super::commit::DbChangeOp;
+
                 if a.name.is_empty() {
                     return Err(format!("Kein Name angegeben"));
                 }
@@ -300,7 +320,31 @@ pub mod index {
                         return Err(format!("Ungültiger \"typ\" angegeben"));
                     }
                 };
-                crate::db::create_zugriff();
+
+                let now = chrono::Utc::now().to_rfc3339();
+
+                for blatt in a.blaetter.iter() {
+                    let zugriff_id = uuid::Uuid::new_v4();
+                    let zugriff_id = format!("{zugriff_id}");
+
+                    crate::api::write_to_root_db(
+                        DbChangeOp::CreateZugriff {
+                            id: zugriff_id,
+                            name: a.name.trim().to_string(),
+                            email: a.email.trim().to_string(),
+                            typ: typ,
+                            grund: a.grund.trim().to_string(),
+                            datum: now.clone(),
+                            land: blatt.land.trim().to_string(),
+                            amtsgericht: blatt.amtsgericht.trim().to_string(),
+                            bezirk: blatt.grundbuchbezirk.trim().to_string(),
+                            blatt: blatt.blatt.trim().to_string(),
+                        },
+                        app_state,
+                    )
+                    .await?;
+                }
+
                 Ok(ZugriffJsonResponseOk::Anfrage(
                     ZugriffJsonAnfrageResponseOk {},
                 ))
@@ -548,6 +592,7 @@ pub mod commit {
         AboLoeschenArgs, AboNeuArgs, AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson,
         BezirkLoeschenArgs, BezirkNeuArgs,
     };
+    use crate::api::index::ZugriffTyp;
     use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
     use chrono::{DateTime, Utc};
     use serde_derive::{Deserialize, Serialize};
@@ -698,7 +743,7 @@ pub mod commit {
             id: String,
             name: String,
             email: String,
-            typ: String,
+            typ: ZugriffTyp,
             grund: String,
             datum: String,
             land: String,
@@ -810,7 +855,7 @@ pub mod commit {
                 id,
                 name,
                 email,
-                typ,
+                *typ,
                 grund,
                 datum,
                 land,

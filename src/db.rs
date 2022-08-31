@@ -1,7 +1,7 @@
 //! Operationen über die Benutzer-Datenbank
 
 use crate::{
-    api::pull::{PullResponse, PullResponseError},
+    api::{pull::{PullResponse, PullResponseError}, index::ZugriffTyp},
     models::{get_data_dir, get_db_path, AbonnementInfo, BenutzerInfo, PdfFile},
     MountPoint,
 };
@@ -1209,6 +1209,22 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
         email: email.to_string(),
         rechte: rechte.to_string(),
     })
+}
+
+pub fn create_zugriff(
+    mount_point: MountPoint,
+    id: &str,
+    name: &str,
+    email: &str,
+    typ: ZugriffTyp,
+    grund: &str,
+    datum: &str,
+    land: &str,
+    amtsgericht: &str,
+    bezirk: &str,
+    blatt: &str,
+) -> Result<(), String> {
+    Ok(()) // TODO
 }
 
 pub fn generate_token() -> (String, DateTime<Utc>) {
