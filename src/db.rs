@@ -121,6 +121,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
                 amtsgericht     STRING NOT NULL,
                 bezirk          STRING NOT NULL,
                 blatt           STRING NOT NULL,
+                angefragt       STRING NOT NULL,
                 gewaehrt_von    STRING,
                 abgelehnt_von   STRING,
                 am              STRING
@@ -684,11 +685,15 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                     email,
                     typ,
                     grund,
-                    blaetter,
+                    land,
+                    amtsgericht,
+                    bezirk,
+                    blatt,
+                    angefragt,
                     gewaehrt_von,
                     abgelehnt_von,
                     am
-                FROM zugriff_anfragen 
+                FROM zugriffe 
             ",
                 )
                 .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 1"))?;
@@ -702,9 +707,13 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                         row.get::<usize, String>(3)?,
                         row.get::<usize, Option<String>>(4)?,
                         row.get::<usize, String>(5)?,
-                        row.get::<usize, Option<String>>(6)?,
-                        row.get::<usize, Option<String>>(7)?,
-                        row.get::<usize, Option<String>>(8)?,
+                        row.get::<usize, String>(6)?,
+                        row.get::<usize, String>(7)?,
+                        row.get::<usize, String>(8)?,
+                        row.get::<usize, String>(9)?,
+                        row.get::<usize, Option<String>>(10)?,
+                        row.get::<usize, Option<String>>(11)?,
+                        row.get::<usize, Option<String>>(12)?,
                     ))
                 })
                 .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
@@ -719,7 +728,11 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                         "email".to_string(),
                         "typ".to_string(),
                         "grund".to_string(),
-                        "blaetter".to_string(),
+                        "land".to_string(),
+                        "amtsgericht".to_string(),
+                        "bezirk".to_string(),
+                        "blatt".to_string(),
+                        "angefragt".to_string(),
                         "gewaehrt_von".to_string(),
                         "abgelehnt_von".to_string(),
                         "am".to_string(),
@@ -737,9 +750,13 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                                     row.3.clone(),
                                     row.4.clone().unwrap_or_default(),
                                     row.5.clone(),
-                                    row.6.clone().unwrap_or_default(),
-                                    row.7.clone().unwrap_or_default(),
-                                    row.8.clone().unwrap_or_default(),
+                                    row.6.clone(),
+                                    row.7.clone(),
+                                    row.8.clone(),
+                                    row.9.clone(),
+                                    row.10.clone().unwrap_or_default(),
+                                    row.11.clone().unwrap_or_default(),
+                                    row.12.clone().unwrap_or_default(),
                                 ],
                             ))
                         })
@@ -1224,6 +1241,28 @@ pub fn create_zugriff(
     bezirk: &str,
     blatt: &str,
 ) -> Result<(), String> {
+    let conn = Connection::open(get_db_path(mount_point))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    conn.execute(
+        "
+        INSERT INTO zugriffe (
+            id, name, email,
+            typ, grund, land,
+            amtsgericht, bezirk, blatt, angefragt
+        ) VALUES (
+            ?1, ?2, ?3, 
+            ?4, ?5, ?6,
+            ?7, ?8, ?9, ?10
+        )",
+        rusqlite::params![
+            id, name, email,
+            typ.to_string(), grund, land,
+            amtsgericht, bezirk, blatt, datum
+        ],
+    )
+    .map_err(|e| format!("Fehler beim Einfügen von Zugriff: {e}"))?;
+
     Ok(()) // TODO
 }
 
