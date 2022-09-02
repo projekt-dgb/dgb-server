@@ -39,7 +39,10 @@ kubectl rollout restart deployment dgb-server
 Zum Installieren der LetsEncrypt-SSL-Zertifikate benötigt `cert-manager`
 Zugriff auf die Cloudflare-API zum Erstellen der `__acme-challenge` DNS-Einträge, 
 siehe https://link.medium.com/aQ4vqJ5Fjrb. Hierbei muss im 
-Cloudflare-Konto ein API-Schlüssel.
+Cloudflare-Konto ein API-Schlüssel aktiviert sein.
+
+Hinweis: Für die Produktion ist Cloudflare nicht zu empfehlen, aber für das Testen
+reicht es völlig aus.
 
 ```
 # CLOUDFLARE_API_TOKEN = token
