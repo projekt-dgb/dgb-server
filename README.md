@@ -11,11 +11,6 @@ cargo run --release -- start && open 127.0.0.1:8080
 ### Deployment
 
 ```sh
-sudo apt install musl-tools lld
-rustup override set 1.60.0
-rustup target add x86_64-unknown-linux-musl
-
-cargo build --release --target x86_64-unknown-linux-musl
 docker build -t grundbuch/dgb-server:latest .
 docker login
 docker push grundbuch/dgb-server:latest
