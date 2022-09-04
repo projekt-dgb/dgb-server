@@ -21,12 +21,14 @@ if (kontotyp == "admin") {
 } else if (kontotyp == "gast") {
     sidebar_items = [
         "Meine Grundbuchblätter",
+        "Meine Abonnements",
         "Einstellungen",
     ]
 } else if (kontotyp == "bearbeiter") {
     sidebar_items = [
         "Meine Änderungen",
         "Meine Grundbuchblätter",
+        "Meine Abonnements",
         "Einstellungen",
     ]
 }
@@ -47,6 +49,23 @@ function changeSection(target) {
     active_sidebar = target.dataset.index;
     renderSidebar();
     renderMainTable();
+}
+
+function addToSelection(target) {
+
+}
+
+function removeFromSelection(target) {
+
+}
+
+function selectAllVisible() {
+
+}
+
+function deselectAll() {
+    selected = [];
+    renderHeader(active_sidebar)
 }
 
 function renderHeader(id) {
