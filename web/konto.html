@@ -8,8 +8,8 @@
         <nav>
             <ul>
                 <li>
-                    <a href="/"><span>Startseite</span></a>
-                    <a href="/api"><span>API</span></a>
+                    <a href="/" class="block-btn"><span>Startseite</span></a>
+                    <a href="/api" class="block-btn"><span>API</span></a>
                 </li>
             </ul>
         </nav>
@@ -19,16 +19,19 @@
         <div id="konto-daten" data-konto-daten="{}"></div>
         <div id="fehler"></div>
         <script async="true" src="/konto.js"></script>
-        <aside id="sidebar">
-            <!-- buttons -->
-        </aside>
-        <main id="main">
-            <input type="text" id ="main-table-filter" />
-            <div id="main-table">
-                <div id="main-table-actions"></div>
-                <div id="main-table-header"></div>
-                <div id="main-table-data"></div>
-            </div>
-        </main>
+        <div id="main-container-flex-row">
+            <aside id="sidebar">
+                <!-- buttons -->
+            </aside>
+            <main id="main">
+                <input type="text" id ="main-table-filter" placeholder = "Tabelle durchsuchen" />
+                <div id="main-table">
+                    <div id="main-table-actions"></div>
+                    <div id="main-table-header"></div>
+                    <div id="main-table-data"></div>
+                </div>
+            </main>
+        </div>
+        <div id="overlay"></div>
     </body>
 </html>

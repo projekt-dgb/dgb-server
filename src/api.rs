@@ -381,8 +381,8 @@ pub mod index {
                 <nav>
                     <ul>
                         <li>
-                            <a href='/'><span>Startseite</span></a>
-                            <a href='/konto'><span>Mein Konto</span></a>
+                            <a href='/' class='block-btn'><span>Startseite</span></a>
+                            <a href='/konto' class='block-btn'><span>Mein Konto</span></a>
                         </li>
                     </ul>
                 </nav>

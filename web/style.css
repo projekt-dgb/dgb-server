@@ -14,7 +14,7 @@ body {
     font-size: 18px;
     line-height: 1.5;
     word-wrap: break-word;
-    max-width: 800px;
+    max-width: 1400px;
     margin: 10px auto;
     padding: 15px;
 }
@@ -44,7 +44,7 @@ input {
     font-size: 1em;
 }
 
-button, a {
+button.block-btn, a.block-btn {
     display: inline-block;
     height: 20px;
     font-weight: bold;
@@ -61,18 +61,18 @@ button, a {
     text-transform: uppercase;
 }
 
-button {
+button.block-btn {
     height: unset;
     cursor: pointer;
     color: #333;
 }
 
-button p, a span{
+button.block-btn p, a.block-btn span{
     position: relative;
     z-index: 2;
 }
 
-button:after, a:after {
+button.block-btn:after, a.block-btn:after {
     position: absolute;
     content: "";
     top: 0;
@@ -83,11 +83,11 @@ button:after, a:after {
     transition: all .35s;
 }
 
-a:hover {
+a.block-btn:hover {
     color: #fff;
 }
 
-button:hover:after, a:hover:after{
+button.block-btn:hover:after, a.block-btn:hover:after{
     width: 100%;
 }
 
@@ -135,9 +135,83 @@ form div {
     display: block;
     float: left;
     width: 200px;
+    min-width: 200px;
+    max-width: 200px;
 }
 
 #main {
     display: block;
     float: left;
+}
+
+#main-container-flex-row {
+    display: flex;
+    flex-direction: row;
+}
+
+button {
+    padding: 0px 5px;
+    margin: 7px 10px;
+}
+#main-table-actions > div {
+
+}
+
+#main-table-actions > div input[type="checkbox"] {
+    margin-left: 7px;
+    transform: translate(0px, 2px);
+}
+
+#main-table-actions > div button {
+    
+}
+
+#main-table-header > div {
+    display: flex;
+    flex-direction: row;
+}
+
+#main-table-header > div p {
+    display: flex;
+    flex-grow: 1;
+    min-width: 50px;
+    border-bottom: 2px solid grey;
+    line-height: 2;
+    box-sizing: border-box;
+    border-right: 2px solid #ccc;
+    padding: 0px 5px;
+}
+#main-table-data {
+    display: flex;
+    overflow-y: scroll;
+}
+
+#main-table-data > div div {
+
+}
+
+#main {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+#main-table-filter {
+    border: none;
+    margin-bottom: 5px;
+    border-bottom: 2px solid #ce0101;
+}
+
+#main-table {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+#main-table-actions {
+    background: black;
+    display: flex;
+    flex-grow: 0;
+    border-radius: 2px;
+    margin-bottom: 5px;
 }

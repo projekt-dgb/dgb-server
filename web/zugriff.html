@@ -8,8 +8,8 @@
         <nav>
             <ul>
                 <li>
-                    <a href="/"><span>Startseite</span></a>
-                    <a href="/api"><span>API</span></a>
+                    <a href="/" class="block-btn"><span>Startseite</span></a>
+                    <a href="/api" class="block-btn"><span>API</span></a>
                 </li>
             </ul>
         </nav>
@@ -30,7 +30,7 @@
             <div>
                 <label>Ich benötige Zugriff auf die Blätter</label><br/>
                 <div id="zugriff-blaetter"></div>
-                <button onclick="blattHinzufuegen(event)">Blatt hinzufügen</button>
+                <button onclick="blattHinzufuegen(event)">&nbsp;Blatt hinzufügen&nbsp;</button>
             </div>
 
             <div>
@@ -49,7 +49,7 @@
             </div>
 
             <br/>
-            <button type="submit"><p>Zugriff anfragen</p></button>
+            <button type="submit" class="block-btn"><p>Zugriff anfragen</p></button>
         </form>
         <script>
 
@@ -133,7 +133,7 @@
                 });
                 html.push("</select>");
 
-                html.push("<button onclick=\"blattLoeschen(event)\" data-blatt-id=\"" + i + "\">x</button>");
+                html.push("<button onclick=\"blattLoeschen(event)\" data-blatt-id=\"" + i + "\">&nbsp;x&nbsp;</button>");
 
                 dom.appendChild(htmlToElement(html.join("\r\n")));
             }
