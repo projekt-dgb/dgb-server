@@ -872,7 +872,8 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                         "zeit-sec".to_string(),
                         "zeit-offset".to_string(),
                         "zeit-tz".to_string(),
-                        "zusammenfassung".to_string(),
+                        "titel".to_string(),
+                        "beschreibung".to_string(),
                     ],
                     daten: aenderungen
                         .into_iter()
@@ -1110,6 +1111,7 @@ pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
         head.author().when().offset_minutes().to_string(),
         head.author().when().sign().to_string(),
         head.summary().map(|s| s.to_string()).unwrap_or_default(),
+        head.message().map(|s| s.to_string()).unwrap_or_default(),
     ];
 
     let commits = match filter {

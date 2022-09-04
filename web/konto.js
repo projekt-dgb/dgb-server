@@ -86,6 +86,9 @@ function renderHeader(id) {
     var header_column_node = document.createElement("div");
     var check_uncheck_all_node_div = document.createElement("div");
     check_uncheck_all_node_div.style.padding = "5px 10px";
+    check_uncheck_all_node_div.style.flexGrow = "0";
+    check_uncheck_all_node_div.style.maxWidth = "18px";
+    check_uncheck_all_node_div.style.minWidth = "18px";
     check_uncheck_all_node_div.style.borderBottom = "2px solid grey";
     var check_uncheck_all_node = document.createElement("input");
     check_uncheck_all_node.type = "checkbox";
@@ -93,13 +96,19 @@ function renderHeader(id) {
     check_uncheck_all_node_div.appendChild(check_uncheck_all_node);
     header_column_node.appendChild(check_uncheck_all_node_div);
 
+    var non_check_node = document.createElement("div");
+    non_check_node.style.display = "flex";
+    non_check_node.style.flexGrow = "1";
     for (var i = 0; i < spalten.length; i++) {
         var element = spalten[i];
         var cell_node = document.createElement("p");
+        cell_node.style.minWidth = (100 / spalten.length) + "%";
+        cell_node.style.maxWidth = (100 / spalten.length) + "%";
         var textnode = document.createTextNode(element);
         cell_node.appendChild(textnode);
-        header_column_node.appendChild(cell_node);
+        non_check_node.appendChild(cell_node);
     }
+    header_column_node.appendChild(non_check_node);
     return header_column_node;
 }
 
@@ -140,17 +149,270 @@ function renderRows(id) {
     // sort_by(keys, filter_by)
     for (var i = 0; i < keys.length; i++) {
         var e = keys[i];
-        if (!filterRow(e, filter_by)) { continue; }
+        // if (!filterRow(e, filter_by)) { continue; }
+
         var row_node = document.createElement("div");
         row_node.dataset.index = e;
-
         var row = kontoDaten.data[id].daten[e];
-        for (var k = 0; k < row.length; k++) {
-            var cell = row[k];
-            var cell_node = document.createElement("p");
-            var textnode = document.createTextNode(cell);
-            cell_node.appendChild(textnode);
-            row_node.appendChild(cell_node);
+
+        if (kontotyp == "admin" && id == "aenderungen") {
+
+            var aenderung_id = row[1];
+            var aenderung_name = row[1];
+            var aenderung_email = row[2];
+            var titel = row[6];
+            var beschreibung = row[7];
+
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+            if (selected.includes(aenderung_id)) {
+                check_node.checked = true;
+            }
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+
+            var non_check_node = document.createElement("div");
+            non_check_node.style.display = "flex";
+            non_check_node.style.flexGrow = "1";
+            non_check_node.style.flexDirection = "row";
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "50%";
+            cell_node.style.minWidth = "50%";
+            cell_node.style.maxWidth = "50%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(aenderung_name);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(aenderung_email);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "50%";
+            cell_node.style.minWidth = "50%";
+            cell_node.style.maxWidth = "50%";
+
+            var cell_text = document.createElement("p");
+            cell_node.classList.add("aenderung-titel");
+            var textnode1 = document.createTextNode(titel);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            cell_node.classList.add("aenderung-beschreibung");
+            var textnode1 = document.createTextNode(beschreibung);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+            
+            row_node.appendChild(non_check_node);
+        } else if (kontotyp == "admin" && id == "zugriffe") {
+
+            var zugriff_id = row[0];
+            var zugriff_name = row[1];
+            var zugriff_email = row[2];
+            var zugriff_typ = row[3];
+            var zugriff_grund = row[4];
+
+            var zugriff_land = row[5];
+            var zugriff_amtsgericht = row[6];
+            var zugriff_bezirk = row[7];
+            var zugriff_blatt = row[8];
+
+            var angefragt = row[9];
+            var gewaehrt_von = row[10];
+            var abgelehnt_von = row[11];
+            var am = row[12];
+
+            var options = { year: '2-digit', month: '2-digit', day: '2-digit', hour: "2-digit", minute: "2-digit", second: "2-digit" };
+            var angefragt_date = new Date(Date.parse(angefragt)).toLocaleDateString("de-DE", options);
+
+            var status = "Warte auf Zugriff, angefragt am";
+            var line2 = angefragt_date;
+
+            if (angefragt != "" && gewaehrt_von != "") {
+                var am = new Date(Date.parse(am)).toLocaleDateString("de-DE", options);
+                status = "Gewährt von" + gewaehrt_von;
+                line2 = "am " + am;
+            } else if (angefragt != "" && abgelehnt_von != "") {
+                var am = new Date(Date.parse(am)).toLocaleDateString("de-DE", options);
+                status = "Abgelehnt von" + abgelehnt_von;
+                line2 = "am " + am;
+            }
+
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+            if (selected.includes(zugriff_id)) {
+                check_node.checked = true;
+            }
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+
+
+            var non_check_node = document.createElement("div");
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_name);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_email);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_typ.replaceAll("\"", ""));
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_grund);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_land);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_amtsgericht);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_bezirk);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(zugriff_blatt);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(status);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(line2);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+            row_node.appendChild(non_check_node);
+
+        } else if (kontotyp == "admin" && id == "benutzer") {
+
+            var benutzer_id = ""; // TODO
+
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+            if (selected.includes(benutzer_id)) {
+                check_node.checked = true;
+            }
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+
+
+            var non_check_node = document.createElement("div");
+            row_node.appendChild(non_check_node);
+
+        } else if (kontotyp == "admin" && id == "bezirke") {
+            var bezirke_id = ""; // TODO
+            
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+
+            if (selected.includes(bezirke_id)) {
+                check_node.checked = true;
+            }
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+
+
+            var non_check_node = document.createElement("div");
+            row_node.appendChild(non_check_node);
+        } else if (kontotyp == "admin" && id == "meine-kontodaten") {
+            
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+
+            var non_check_node = document.createElement("div");
+            row_node.appendChild(non_check_node);
         }
 
         node_data.appendChild(row_node);
