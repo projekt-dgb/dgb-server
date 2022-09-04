@@ -119,7 +119,9 @@ function renderSidebar() {
     for (var index = 0; index < sidebar_items.length; index++) {
         var element = sidebar_items[index];
 
-        var node = document.createElement("p");
+        var node = document.createElement("a");
+        node.style.display = "flex";
+        node.tabIndex = "1";
         node.style.cursor = "pointer";
         node.style.width = "100%";
         node.style.textDecoration = "underline";
@@ -128,6 +130,7 @@ function renderSidebar() {
         }
         node.dataset.index = index;
         node.onclick = function(){ changeSection(this) };
+        node.onkeyup = function(e){ console.log(e); if (e.key == "Enter") { changeSection(this) } };
 
         var textnode = document.createTextNode(element);
         node.appendChild(textnode);
@@ -357,7 +360,11 @@ function renderRows(id) {
 
         } else if (kontotyp == "admin" && id == "benutzer") {
 
-            var benutzer_id = ""; // TODO
+            var benutzer_name = row[0]; 
+            var benutzer_email = row[1]; 
+            var benutzer_rechte = row[2]; 
+            var pubkey_fingerprint = row[3]; 
+            var pubkey = row[4]; 
 
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.padding = "5px 10px";
@@ -367,7 +374,7 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
-            if (selected.includes(benutzer_id)) {
+            if (selected.includes(benutzer_email)) {
                 check_node.checked = true;
             }
             check_uncheck_all_node_div.appendChild(check_node);
@@ -375,11 +382,69 @@ function renderRows(id) {
 
 
             var non_check_node = document.createElement("div");
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(benutzer_name);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(benutzer_email);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(benutzer_rechte);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "25%";
+            cell_node.style.minWidth = "25%";
+            cell_node.style.maxWidth = "25%";
+
+            var cell_text = document.createElement("button");
+            cell_text.textContent = "Öffentlicher Schlüssel";
+            if (pubkey == "") {
+                cell_text.textContent = "Schlüsselpaar generieren";
+            }
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
             row_node.appendChild(non_check_node);
 
         } else if (kontotyp == "admin" && id == "bezirke") {
-            var bezirke_id = ""; // TODO
             
+            var land = row[0];
+            var amtsgericht = row[1];
+            var bezirk = row[2];
+
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.padding = "5px 10px";
             check_uncheck_all_node_div.style.flexGrow = "0";
@@ -388,15 +453,53 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
-
-            if (selected.includes(bezirke_id)) {
+            if (selected.includes("" + i)) {
                 check_node.checked = true;
             }
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
-
             var non_check_node = document.createElement("div");
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "33.3%";
+            cell_node.style.minWidth = "33.3%";
+            cell_node.style.maxWidth = "33.3%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(land);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "33.3%";
+            cell_node.style.minWidth = "33.3%";
+            cell_node.style.maxWidth = "33.3%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(amtsgericht);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "33.3%";
+            cell_node.style.minWidth = "33.3%";
+            cell_node.style.maxWidth = "33.3%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(bezirk);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
             row_node.appendChild(non_check_node);
         } else if (kontotyp == "admin" && id == "meine-kontodaten") {
             
@@ -438,6 +541,11 @@ function renderActions(id) {
         actions_data.appendChild(zurueckziehen);
     } else if (kontotyp == "admin" && id == "benutzer") {
 
+        var change = document.createElement("button");
+        change.textContent = "Neuen Benutzer anlegen";
+        change.onclick = function(){ benutzerNeu(this) };
+        actions_data.appendChild(change);
+    
         var change = document.createElement("button");
         change.textContent = "Benutzer bearbeiten";
         actions_data.appendChild(change);
@@ -493,6 +601,10 @@ function renderMainTable() {
 
         }
     }
+}
+
+function benutzerNeu(target) {
+
 }
 
 function renderActionsBar() {
