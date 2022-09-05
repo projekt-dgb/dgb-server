@@ -71,25 +71,75 @@ function updateFilter(target) {
 
 function changeSection(target) {
     active_sidebar = target.dataset.index;
+    selected = [];
+    filter_by = null;
     renderSidebar();
     renderMainTable();
+    updateFilter();
 }
 
 function addToSelection(target) {
-
+    if (!target) {
+        return;
+    }
+    var id = target.dataset.id;
+    selected.push(id);
+    selected.sort();
+    renderMainTable();
 }
 
 function removeFromSelection(target) {
+    if (!target) {
+        return;
+    }
 
+    var id = target.dataset.id;
+    selected.push(id);
+    selected.sort();
+    var newarray = [];
+    for (var i = 0; i < selected.length; i++) {
+        var element = array[i];
+        if (element != id) {
+            newarray.push(element);
+        }
+    }
+    selected = newarray;
+    renderMainTable();
 }
 
 function selectAllVisible() {
 
+    var active_section = getActiveSectionName();
+    var kontoDaten = getKontoDaten();
+    var keys = Object.keys(kontoDaten.data[id].daten);
+    selected = [];
+    for (var i = 0; i < keys.length; i++) {
+        var e = keys[i];
+        var row = kontoDaten.data[id].daten[e];
+        if (!rowIsValid(row, filter_by)) { continue; }
+        if (kontotyp == "admin" && id == "aenderungen") {
+            var aenderung_id = row[1];
+            selected.push(aenderung_id);
+        } else if (kontotyp == "admin" && id == "zugriffe") {
+            var zugriff_id = row[0];
+            selected.push(zugriff_id);
+        } else if (kontotyp == "admin" && id == "benutzer") {
+            var benutzer_email = row[1];
+            selected.push(benutzer_email);
+        } else if (kontotyp == "admin" && id == "bezirke") {
+            var id = "" + i;
+            selected.push(id);
+        } else if (kontotyp == "admin" && id == "meine-kontodaten") {
+        
+        }
+    }
+    selected.sort();
+    renderMainTable();
 }
 
 function deselectAll() {
     selected = [];
-    renderHeader(active_sidebar)
+    renderMainTable();
 }
 
 function renderHeader(id) {
@@ -135,6 +185,13 @@ function renderHeader(id) {
     check_uncheck_all_node_div.style.borderBottom = "2px solid grey";
     var check_uncheck_all_node = document.createElement("input");
     check_uncheck_all_node.type = "checkbox";
+    if (selected == []) {
+        check_uncheck_all_node.checked = false;
+        check_uncheck_all_node.ontoggle = function() { selectAllVisible(this); };
+    } else {
+        check_uncheck_all_node.checked = true;
+        check_uncheck_all_node.ontoggle = function() { deselectAll(); };
+    }
     check_uncheck_all_node.style.minWidth = "15px";
     check_uncheck_all_node_div.appendChild(check_uncheck_all_node);
     header_column_node.appendChild(check_uncheck_all_node_div);
@@ -220,8 +277,12 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
+            check_node.dataset.id = aenderung_id;
             if (selected.includes(aenderung_id)) {
                 check_node.checked = true;
+                check_node.ontoggle = function() { removeFromSelection(this); };
+            } else {
+                check_node.ontoggle = function() { addToSelection(this); };
             }
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
@@ -312,8 +373,12 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
+            check_node.dataset.id = zugriff_id;
             if (selected.includes(zugriff_id)) {
                 check_node.checked = true;
+                check_node.ontoggle = function() { removeFromSelection(this); };
+            } else {
+                check_node.ontoggle = function() { addToSelection(this); };
             }
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
@@ -420,8 +485,12 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
+            check_node.dataset.id = benutzer_email;
             if (selected.includes(benutzer_email)) {
                 check_node.checked = true;
+                check_node.ontoggle = function() { removeFromSelection(this); };
+            } else {
+                check_node.ontoggle = function() { addToSelection(this); };
             }
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
@@ -499,9 +568,13 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
+            check_node.dataset.id = "" + i;
             if (selected.includes("" + i)) {
                 check_node.checked = true;
-            }
+                check_node.ontoggle = function() { removeFromSelection(this); };
+            } else {
+                check_node.ontoggle = function() { addToSelection(this); };
+            }            
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
@@ -554,6 +627,7 @@ function renderRows(id) {
             check_uncheck_all_node_div.style.flexGrow = "0";
             check_uncheck_all_node_div.style.maxWidth = "18px";
             check_uncheck_all_node_div.style.minWidth = "18px";
+
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
