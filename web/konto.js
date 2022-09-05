@@ -38,11 +38,35 @@ var filter_by = null;
 var sort_by = null;
 var selected = [];
 
-function updateFilter(event) {
-    var input = document.getElementById("main-table-filter");
-    if (!input) {
+function getActiveSectionName() {
+    if (kontotyp == "admin") {
+        if (active_sidebar == 0) {
+            return "aenderungen";
+        } else if (active_sidebar == 1) {
+            return "zugriffe";
+        } else if (active_sidebar == 2) {
+            return "benutzer";
+        } else if (active_sidebar == 3) {
+            return "bezirke";
+        } else if (active_sidebar == 4) {
+            return "meine-kontodaten";
+        } else {
+            return "";
+        }
+    } else {
+        return "";
+    }
+}
+
+function updateFilter(target) {
+    if (!target) {
         return;
     }
+    filter_by = target.value;
+    var active_section = getActiveSectionName();
+    var node_data = document.getElementById("main-table-data");
+    node_data.innerHTML = '';
+    node_data.appendChild(renderRows(active_section));
 }
 
 function changeSection(target) {
@@ -149,7 +173,7 @@ function renderSidebar() {
         }
         node.dataset.index = index;
         node.onclick = function(){ changeSection(this) };
-        node.onkeyup = function(e){ console.log(e); if (e.key == "Enter") { changeSection(this) } };
+        node.onkeyup = function(e){ if (e.key == "Enter") { changeSection(this) } };
 
         var textnode = document.createTextNode(element);
         node.appendChild(textnode);
@@ -157,11 +181,15 @@ function renderSidebar() {
     }
 }
 
-function filterRow(e, filter) {
+function rowIsValid(cells, filter) {
     if (!filter) {
-        return false;
+        return true;
     }
-    return e.includes(filter);
+    for (var i = 0; i < cells.length; i++) {
+        var e = cells[i];
+        if (e.includes(filter)) { return true; }
+    }
+    return false;
 }
 
 function renderRows(id) {
@@ -171,11 +199,10 @@ function renderRows(id) {
     // sort_by(keys, filter_by)
     for (var i = 0; i < keys.length; i++) {
         var e = keys[i];
-        // if (!filterRow(e, filter_by)) { continue; }
-
+        var row = kontoDaten.data[id].daten[e];
+        if (!rowIsValid(row, filter_by)) { continue; }
         var row_node = document.createElement("div");
         row_node.dataset.index = e;
-        var row = kontoDaten.data[id].daten[e];
 
         if (kontotyp == "admin" && id == "aenderungen") {
 
@@ -596,30 +623,10 @@ function renderMainTable() {
     node_data.innerHTML = '';
     node_header.innerHTML = '';
 
-    if (kontotyp == "admin") {
-        if (active_sidebar == 0) {
-            node_header.appendChild(renderHeader("aenderungen"));
-            node_data.appendChild(renderRows("aenderungen"));
-            node_actions.appendChild(renderActions("aenderungen"));
-        } else if (active_sidebar == 1) {
-            node_header.appendChild(renderHeader("zugriffe"));
-            node_data.appendChild(renderRows("zugriffe"));
-            node_actions.appendChild(renderActions("zugriffe"));
-        } else if (active_sidebar == 2) {
-            node_header.appendChild(renderHeader("benutzer"));
-            node_data.appendChild(renderRows("benutzer"));
-            node_actions.appendChild(renderActions("benutzer"));
-        } else if (active_sidebar == 3) {
-            node_header.appendChild(renderHeader("bezirke"));
-            node_data.appendChild(renderRows("bezirke"));
-            node_actions.appendChild(renderActions("bezirke"));
-        } else if (active_sidebar == 4) {
-            // var keys = kontoDaten.data["meine-kontodaten"].daten.keys();
-            node_header.appendChild(renderHeader("meine-kontodaten"));
-            node_data.appendChild(renderRows("meine-kontodaten"));
-
-        }
-    }
+    var active_section = getActiveSectionName();
+    node_header.appendChild(renderHeader(active_section));
+    node_data.appendChild(renderRows(active_section));
+    node_actions.appendChild(renderActions(active_section));
 }
 
 function benutzerNeu(target) {
@@ -632,3 +639,5 @@ function renderActionsBar() {
 
 renderSidebar();
 renderMainTable();
+document.getElementById("main-table-filter").onchange = function() { updateFilter(this); }
+document.getElementById("main-table-filter").oninput = function() { updateFilter(this); }
