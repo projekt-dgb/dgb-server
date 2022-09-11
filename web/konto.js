@@ -94,11 +94,10 @@ function removeFromSelection(target) {
     }
 
     var id = target.dataset.id;
-    selected.push(id);
     selected.sort();
     var newarray = [];
     for (var i = 0; i < selected.length; i++) {
-        var element = array[i];
+        var element = selected[i];
         if (element != id) {
             newarray.push(element);
         }
@@ -283,12 +282,14 @@ function renderRows(id) {
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
             check_node.dataset.id = aenderung_id;
-            if (selected.includes(aenderung_id)) {
-                check_node.checked = true;
-                check_node.ontoggle = function() { removeFromSelection(this); };
-            } else {
-                check_node.ontoggle = function() { addToSelection(this); };
-            }
+            check_node.checked = selected.includes(aenderung_id);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
@@ -379,12 +380,14 @@ function renderRows(id) {
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
             check_node.dataset.id = zugriff_id;
-            if (selected.includes(zugriff_id)) {
-                check_node.checked = true;
-                check_node.ontoggle = function() { removeFromSelection(this); };
-            } else {
-                check_node.ontoggle = function() { addToSelection(this); };
-            }
+            check_node.checked = selected.includes(zugriff_id);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
@@ -491,12 +494,14 @@ function renderRows(id) {
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
             check_node.dataset.id = benutzer_email;
-            if (selected.includes(benutzer_email)) {
-                check_node.checked = true;
-                check_node.ontoggle = function() { removeFromSelection(this); };
-            } else {
-                check_node.ontoggle = function() { addToSelection(this); };
-            }
+            check_node.checked = selected.includes(benutzer_email);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
@@ -574,12 +579,14 @@ function renderRows(id) {
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
             check_node.dataset.id = "" + i;
-            if (selected.includes("" + i)) {
-                check_node.checked = true;
-                check_node.ontoggle = function() { removeFromSelection(this); };
-            } else {
-                check_node.ontoggle = function() { addToSelection(this); };
-            }            
+            check_node.checked = selected.includes("" + i);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
@@ -709,10 +716,6 @@ function renderMainTable() {
 }
 
 function benutzerNeu(target) {
-
-}
-
-function renderActionsBar() {
 
 }
 
