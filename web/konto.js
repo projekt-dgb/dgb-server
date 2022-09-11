@@ -111,25 +111,29 @@ function selectAllVisible() {
 
     var active_section = getActiveSectionName();
     var kontoDaten = getKontoDaten();
-    var keys = Object.keys(kontoDaten.data[id].daten);
+    var activeSection = kontoDaten.data[active_section];
+    if (!activeSection) {
+        return;
+    }
+    var keys = Object.keys(activeSection.daten);
     selected = [];
     for (var i = 0; i < keys.length; i++) {
         var e = keys[i];
-        var row = kontoDaten.data[id].daten[e];
+        var row = activeSection.daten[e];
         if (!rowIsValid(row, filter_by)) { continue; }
-        if (kontotyp == "admin" && id == "aenderungen") {
+        if (kontotyp == "admin" && active_section == "aenderungen") {
             var aenderung_id = row[1];
             selected.push(aenderung_id);
-        } else if (kontotyp == "admin" && id == "zugriffe") {
+        } else if (kontotyp == "admin" && active_section == "zugriffe") {
             var zugriff_id = row[0];
             selected.push(zugriff_id);
-        } else if (kontotyp == "admin" && id == "benutzer") {
+        } else if (kontotyp == "admin" && active_section == "benutzer") {
             var benutzer_email = row[1];
             selected.push(benutzer_email);
-        } else if (kontotyp == "admin" && id == "bezirke") {
+        } else if (kontotyp == "admin" && active_section == "bezirke") {
             var id = "" + i;
             selected.push(id);
-        } else if (kontotyp == "admin" && id == "meine-kontodaten") {
+        } else if (kontotyp == "admin" && active_section == "meine-kontodaten") {
         
         }
     }
@@ -185,13 +189,14 @@ function renderHeader(id) {
     check_uncheck_all_node_div.style.borderBottom = "2px solid grey";
     var check_uncheck_all_node = document.createElement("input");
     check_uncheck_all_node.type = "checkbox";
-    if (selected == []) {
-        check_uncheck_all_node.checked = false;
-        check_uncheck_all_node.ontoggle = function() { selectAllVisible(this); };
-    } else {
-        check_uncheck_all_node.checked = true;
-        check_uncheck_all_node.ontoggle = function() { deselectAll(); };
-    }
+    check_uncheck_all_node.checked = selected.length != 0;
+    check_uncheck_all_node.addEventListener('change', function(event) {
+        if (event.currentTarget.checked) {
+            selectAllVisible();
+        } else {
+            deselectAll();
+        }
+    });
     check_uncheck_all_node.style.minWidth = "15px";
     check_uncheck_all_node_div.appendChild(check_uncheck_all_node);
     header_column_node.appendChild(check_uncheck_all_node_div);
