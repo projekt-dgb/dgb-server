@@ -662,37 +662,44 @@ function renderActions(id) {
     } else if (kontotyp == "admin" && id == "zugriffe") {
         var genehmigen = document.createElement("button");
         genehmigen.textContent = "Zugriff genehmigen";
+        genehmigen.onclick = function() { zugriffGenehmigen(); }
         actions_data.appendChild(genehmigen);
 
         var ablehnen = document.createElement("button");
         ablehnen.textContent = "Zugriff ablehnen";
+        ablehnen.onclick = function() { zugriffAblehnen(); }
         actions_data.appendChild(ablehnen);
 
         var zurueckziehen = document.createElement("button");
         zurueckziehen.textContent = "Zugriff zurückziehen";
+        zurueckziehen.onclick = function() { zugriffZurueckziehen(); }
         actions_data.appendChild(zurueckziehen);
     } else if (kontotyp == "admin" && id == "benutzer") {
 
         var change = document.createElement("button");
         change.textContent = "Neuen Benutzer anlegen";
-        change.onclick = function(){ benutzerNeu(this) };
+        change.onclick = function(){ benutzerNeu(); };
         actions_data.appendChild(change);
     
         var change = document.createElement("button");
         change.textContent = "Benutzer bearbeiten";
+        change.onclick = function() { benutzerBearbeiten(this); }
         actions_data.appendChild(change);
 
         var loeschen = document.createElement("button");
         loeschen.textContent = "Benutzer löschen";
+        loeschen.onclick = function() { benutzerLoeschen(); }
         actions_data.appendChild(loeschen);
     } else if (kontotyp == "admin" && id == "bezirke") {
 
         var bezirk_new = document.createElement("button");
         bezirk_new.textContent = "Bezirk hinzufügen";
+        bezirk_new.onclick = function() { bezirkNeu(); }
         actions_data.appendChild(bezirk_new);
 
         var loeschen = document.createElement("button");
         loeschen.textContent = "Bezirk löschen";
+        loeschen.onclick = function() { bezirkLoeschen(); }
         actions_data.appendChild(loeschen);
     }
     
@@ -715,8 +722,72 @@ function renderMainTable() {
     node_actions.appendChild(renderActions(active_section));
 }
 
-function benutzerNeu(target) {
+function postToServer(aktion, daten) {
+    var auth = document.getElementById("token-id").dataset.tokenId;
+    if (!auth) {
+        return;
+    }
+    var http = new XMLHttpRequest();
+    http.open('POST', '/konto', true);
+    http.setRequestHeader('Content-type', 'application/json');
+    http.onreadystatechange = function() {
+        if (http.readyState == 4 && http.status == 200) {
+            var object = JSON.parse(http.responseText);
+            if (object.status == "ok") {
+                setKontoDaten(object);
+                renderMainTable();
+            } else if (object.status == "error") {
+                console.error("" + object.code + ": " + object.text);
+            }
+        }
+    }
+    http.send(JSON.stringify({
+        auth: auth,
+        aktion: aktion,
+        daten: daten,
+    }));
+}
 
+function zugriffZurueckziehen() {
+    postToServer("zugriff-zurueckziehen", selected);
+}
+
+function zugriffGenehmigen() {
+    postToServer("zugriff-genehmigen", selected);
+}
+
+function zugriffAblehnen() {
+    postToServer("zugriff-ablehnen", selected);
+}
+
+function benutzerNeu() {
+    var name = window.prompt("Name", "");
+    var email = window.prompt("E-Mail", "");
+    postToServer("benutzer-neu", [name, email]);
+}
+
+function benutzerBearbeiten(element) {
+    var id = element.dataset.id;
+    var name = window.prompt("Name", "");
+    var email = window.prompt("E-Mail", "");
+    postToServer("benutzer-neu", [id, name, email]);
+}
+
+
+function benutzerLoeschen() {
+    postToServer("benutzer-loeschen", selected);
+}
+
+function bezirkNeu() {
+    var land = window.prompt("Bitte geben Sie das Land ein", "Brandenburg");
+    var amtsgericht = window.prompt("Bitte geben Sie das Amtsgericht ein", "Prenzlau");
+    var bezirk = window.prompt("Bitte geben Sie das Blatt ein", "Ludwigsburg");
+    postToServer("bezirk-neu", [land, amtsgericht, bezirk]);
+}
+
+function bezirkLoeschen() {
+    console.log("bezirk löschen");
+    postToServer("bezirk-loeschen", selected);
 }
 
 renderSidebar();

@@ -45,7 +45,6 @@
                 if (http.readyState == 4 && http.status == 200) {
                     document.getElementById("formdata").reset();
                     var object = JSON.parse(http.responseText);
-                    console.log(object);
                     if (object.status == "ok") {
                         document.cookie = "Authentication=" + (object.token || "") + "; path=/";
                         window.location.href = '/konto';

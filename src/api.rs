@@ -511,7 +511,7 @@ pub mod login {
 
 /// API für `/konto` Anfragen: Gibt HTML-Übersicht für Benutzer / Abo-Verwaltung
 pub mod konto {
-    use actix_web::{get, post, HttpRequest, HttpResponse, Responder};
+    use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
 
     use crate::db::KontoData;
@@ -559,16 +559,54 @@ pub mod konto {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct KontoJsonPost {
-        pub tabelle: String,
-        #[serde(default)]
-        pub ids: Vec<usize>,
-        pub action: String,
+        auth: String,
+        aktion: String,
+        daten: Vec<String>,
     }
 
-    // Login-Seite
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
+    enum KontoJsonPostResponse {
+        #[serde(rename = "ok")]
+        Ok(KontoData),
+        #[serde(rename = "error")]
+        Error(KontoJsonPostResponseError),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct KontoJsonPostResponseError {
+        code: usize,
+        text: String,
+    }
+
     #[post("/konto")]
-    async fn konto_post(req: HttpRequest) -> impl Responder {
+    async fn konto_post(_: HttpRequest, data: web::Json<KontoJsonPost>) -> impl Responder {
+        let result =  match konto_post_inner(&*data).await {
+            Ok(o) => KontoJsonPostResponse::Ok(o),
+            Err(e) => KontoJsonPostResponse::Error(e),
+        };
+
         HttpResponse::Ok()
+        .content_type("application/json")
+        .body(serde_json::to_string(&result).unwrap_or_default())
+    }
+
+    async fn konto_post_inner(data: &KontoJsonPost) -> Result<KontoData, KontoJsonPostResponseError> {
+
+        println!("data (konto): {:#?}", data);
+
+        let benutzer = crate::db::get_user_from_token(&data.auth)
+        .map_err(|e| KontoJsonPostResponseError {
+            code: 500,
+            text: e,
+        })?;
+
+        println!("benutzer (konto): {:#?}", benutzer);
+
+        let konto_data = crate::db::get_konto_data(&benutzer)
+        .unwrap_or_default();
+
+        Ok(konto_data)
     }
 }
 
