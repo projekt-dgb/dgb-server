@@ -514,7 +514,7 @@ pub mod konto {
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
 
-    use crate::db::KontoData;
+    use crate::{db::KontoData, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs};
 
     // Konto-Seite
     #[get("/konto")]
@@ -580,8 +580,8 @@ pub mod konto {
     }
 
     #[post("/konto")]
-    async fn konto_post(_: HttpRequest, data: web::Json<KontoJsonPost>) -> impl Responder {
-        let result =  match konto_post_inner(&*data).await {
+    async fn konto_post(_: HttpRequest, state: web::Data<AppState>, data: web::Json<KontoJsonPost>) -> impl Responder {
+        let result =  match konto_post_inner(&*state, &*data).await {
             Ok(o) => KontoJsonPostResponse::Ok(o),
             Err(e) => KontoJsonPostResponse::Error(e),
         };
@@ -591,7 +591,11 @@ pub mod konto {
         .body(serde_json::to_string(&result).unwrap_or_default())
     }
 
-    async fn konto_post_inner(data: &KontoJsonPost) -> Result<KontoData, KontoJsonPostResponseError> {
+    async fn konto_post_inner(app_state: &AppState, data: &KontoJsonPost) -> Result<KontoData, KontoJsonPostResponseError> {
+
+        use crate::api::commit::DbChangeOp;
+        use crate::BenutzerAendernArgs;
+        use crate::BezirkNeuArgs;
 
         println!("data (konto): {:#?}", data);
 
@@ -602,6 +606,194 @@ pub mod konto {
         })?;
 
         println!("benutzer (konto): {:#?}", benutzer);
+
+        match (benutzer.rechte.as_str(), data.aktion.as_str()) {
+            ("admin", "benutzer-neu") => {
+                let name = data.daten.get(0)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: kein Name in Daten vorhanden".to_string(),
+                })?;
+                let email = data.daten.get(1)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: keine E-Mail in Daten vorhanden".to_string(),
+                })?;
+                let passwort = data.daten.get(2)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: kein Passwort in Daten vorhanden".to_string(),
+                })?;
+                let rechte = "gast";
+                crate::api::write_to_root_db(DbChangeOp::BenutzerNeu(BenutzerNeuArgsJson {
+                    name: name.clone(),
+                    email: email.clone(),
+                    passwort: passwort.clone(),
+                    rechte: rechte.to_string(),
+                    schluessel: None,
+                }), &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "benutzer-loeschen") => {
+                let email = data.daten.get(0)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer löschen: keine E-Mail in Daten vorhanden".to_string(),
+                })?;
+                crate::api::write_to_root_db(DbChangeOp::BenutzerLoeschen(BenutzerLoeschenArgs {
+                    email: email.clone(),
+                }), &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "benutzer-bearbeiten") => {
+                let name = data.daten.get(0)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: kein Name in Daten vorhanden".to_string(),
+                })?;
+                let name = if name.is_empty() {
+                    None
+                } else {
+                    Some(name.to_string())
+                };
+                let email = data.daten.get(1)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: keine E-Mail in Daten vorhanden".to_string(),
+                })?;
+                let email = if email.is_empty() {
+                    None
+                } else {
+                    Some(email.to_string())
+                };
+                let passwort = data.daten.get(2)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: kein Passwort in Daten vorhanden".to_string(),
+                })?;
+                let passwort = if passwort.is_empty() {
+                    None
+                } else {
+                    Some(passwort.to_string())
+                };
+                let rechte = data.daten.get(3)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: kein Recht in Daten vorhanden".to_string(),
+                })?;
+                let rechte = if rechte.is_empty() {
+                    None
+                } else {
+                    Some(rechte.to_string())
+                };
+                let schluessel = data.daten.get(4)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer neu anlegen: kein Schlüssel in Daten vorhanden".to_string(),
+                })?;
+                let schluessel = if schluessel.is_empty() {
+                    None
+                } else {
+                    Some(schluessel.to_string())
+                };
+
+                crate::api::write_to_root_db(DbChangeOp::BenutzerAendern(BenutzerAendernArgs {
+                    name,
+                    email,
+                    passwort,
+                    rechte,
+                    schluessel,
+                }), &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "bezirk-neu") => {
+                let mut bezirke = Vec::new();
+                // daten =  CSV-Datei als Zellen (Land, Amtsgericht, Bezirk)
+                for (i, triple) in data.daten.chunks(3).enumerate() {
+                    let land = triple.get(0)
+                    .ok_or(KontoJsonPostResponseError {
+                        code: 500,
+                        text: format!("Bezirke neu anlegen: Fehler in Zeile {i}: Bundesland fehlt"),
+                    })?;
+                    let amtsgericht = triple.get(1)
+                    .ok_or(KontoJsonPostResponseError {
+                        code: 500,
+                        text: format!("Bezirke neu anlegen: Fehler in Zeile {i}: Amtsgericht fehlt"),
+                    })?;
+                    let bezirk = triple.get(2)
+                    .ok_or(KontoJsonPostResponseError {
+                        code: 500,
+                        text: format!("Bezirke neu anlegen: Fehler in Zeile {i}: Grundbuchbezirk fehlt"),
+                    })?;
+                    bezirke.push(BezirkNeuArgs {
+                        land: land.clone(), 
+                        amtsgericht: amtsgericht.clone(), 
+                        bezirk: bezirk.clone()
+                    });
+                }
+
+                crate::api::write_to_root_db(DbChangeOp::BezirkeNeu(BezirkeNeuArgs {
+                    bezirke: bezirke,
+                }), &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "bezirk-loeschen") => {
+                crate::api::write_to_root_db(DbChangeOp::BezirkeLoeschen(BezirkeLoeschenArgs {
+                    ids: data.daten.clone(),
+                }), &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "zugriff-genehmigen") => {
+                crate::api::write_to_root_db(DbChangeOp::ZugriffGenehmigen {
+                    ids: data.daten.clone(),
+                    email: benutzer.email.clone(),
+                    datum: chrono::Utc::now().to_rfc3339(),
+                }, &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "zugriff-ablehnen") => {
+                crate::api::write_to_root_db(DbChangeOp::ZugriffAblehnen {
+                    ids: data.daten.clone(),
+                    email: benutzer.email.clone(),
+                    datum: chrono::Utc::now().to_rfc3339(),
+                }, &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            _ => {
+                return Err(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer ist zum Ausführen dieser Aktion nicht authorisiert".to_string(),
+                })
+            }
+        }
 
         let konto_data = crate::db::get_konto_data(&benutzer)
         .unwrap_or_default();
@@ -628,7 +820,8 @@ pub mod commit {
     use crate::models::{get_data_dir, get_db_path, MountPoint};
     use crate::{
         AboLoeschenArgs, AboNeuArgs, AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson,
-        BezirkLoeschenArgs, BezirkNeuArgs,
+        BezirkLoeschenArgs, BezirkNeuArgs, BenutzerAendernArgs, BezirkeNeuArgs,
+        BezirkeLoeschenArgs,
     };
     use crate::api::index::ZugriffTyp;
     use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
@@ -772,9 +965,14 @@ pub mod commit {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub(crate) enum DbChangeOp {
         BenutzerNeu(BenutzerNeuArgsJson),
+        BenutzerAendern(BenutzerAendernArgs),
         BenutzerLoeschen(BenutzerLoeschenArgs),
         BezirkNeu(BezirkNeuArgs),
+        // Mehrere Bezirke gleichzeitig mit Datenbank abgleichen
+        BezirkeNeu(BezirkeNeuArgs),
         BezirkLoeschen(BezirkLoeschenArgs),
+        // Mehrere Bezirke anhand ID löschen
+        BezirkeLoeschen(BezirkeLoeschenArgs),
         AboNeu(AboNeuArgs),
         AboLoeschen(AboLoeschenArgs),
         CreateZugriff {
@@ -788,6 +986,16 @@ pub mod commit {
             amtsgericht: String,
             bezirk: String,
             blatt: String,
+        },
+        ZugriffGenehmigen {
+            ids: Vec<String>,
+            email: String,
+            datum: String,
+        },
+        ZugriffAblehnen {
+            ids: Vec<String>,
+            email: String,
+            datum: String,
         },
         BenutzerSessionNeu {
             email: String,
@@ -848,6 +1056,18 @@ pub mod commit {
                 &un.rechte,
                 un.schluessel.clone(),
             ),
+            DbChangeOp::BenutzerAendern(a) => crate::db::change_user(
+                mount_point_write,
+                a.name.as_ref().map(|s| s.as_str()),
+                a.email.as_ref().map(|s| s.as_str()),
+                a.passwort.as_ref().map(|s| s.as_str()),
+                a.rechte.as_ref().map(|s| s.as_str()),
+                a.schluessel.as_ref().map(|s| s.as_str()),
+            ),
+            DbChangeOp::BezirkeLoeschen(b) => crate::db::bezirke_loeschen(
+                mount_point_write,
+                b.ids.as_ref(),
+            ),
             DbChangeOp::BenutzerLoeschen(ul) => {
                 crate::db::delete_user(mount_point_write, &ul.email)
             }
@@ -856,6 +1076,10 @@ pub mod commit {
                 &bn.land,
                 &bn.amtsgericht,
                 &bn.bezirk,
+            ),
+            DbChangeOp::BezirkeNeu(b) => crate::db::bezirke_einfuegen(
+                mount_point_write,
+                &b.bezirke,
             ),
             DbChangeOp::BezirkLoeschen(bl) => crate::db::delete_gemarkung(
                 mount_point_write,
@@ -901,6 +1125,12 @@ pub mod commit {
                 bezirk,
                 blatt,
             ),
+            DbChangeOp::ZugriffGenehmigen { ids, email, datum } => {
+                crate::db::zugriff_genehmigen(mount_point_write, ids, email, datum)
+            },
+            DbChangeOp::ZugriffAblehnen { ids, email, datum } => {
+                crate::db::zugriff_genehmigen(mount_point_write, ids, email, datum)
+            }
             DbChangeOp::BenutzerSessionNeu {
                 email,
                 token,

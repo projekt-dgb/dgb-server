@@ -130,8 +130,8 @@ function selectAllVisible() {
             var benutzer_email = row[1];
             selected.push(benutzer_email);
         } else if (kontotyp == "admin" && active_section == "bezirke") {
-            var id = "" + i;
-            selected.push(id);
+            var bezirk_id = row[0];
+            selected.push(bezirk_id);
         } else if (kontotyp == "admin" && active_section == "meine-kontodaten") {
         
         }
@@ -566,9 +566,10 @@ function renderRows(id) {
 
         } else if (kontotyp == "admin" && id == "bezirke") {
             
-            var land = row[0];
-            var amtsgericht = row[1];
-            var bezirk = row[2];
+            var bezirk_id = row[0];
+            var land = row[1];
+            var amtsgericht = row[2];
+            var bezirk = row[3];
 
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.padding = "5px 10px";
@@ -578,8 +579,8 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
-            check_node.dataset.id = "" + i;
-            check_node.checked = selected.includes("" + i);
+            check_node.dataset.id = bezirk_id;
+            check_node.checked = selected.includes(bezirk_id);
             check_node.addEventListener('change', function(event) {
                 if (event.currentTarget.checked) {
                     addToSelection(event.currentTarget);
@@ -692,9 +693,10 @@ function renderActions(id) {
         actions_data.appendChild(loeschen);
     } else if (kontotyp == "admin" && id == "bezirke") {
 
-        var bezirk_new = document.createElement("button");
-        bezirk_new.textContent = "Bezirk hinzufügen";
-        bezirk_new.onclick = function() { bezirkNeu(); }
+        var bezirk_new = document.createElement("input");
+        bezirk_new.type = "file";
+        bezirk_new.textContent = "Bezirke von CSV laden";
+        bezirk_new.onchange = function() { bezirkNeuVonCsv(this); }
         actions_data.appendChild(bezirk_new);
 
         var loeschen = document.createElement("button");
@@ -762,31 +764,59 @@ function zugriffAblehnen() {
 
 function benutzerNeu() {
     var name = window.prompt("Name", "");
+    if (!name) { return; }
     var email = window.prompt("E-Mail", "");
-    postToServer("benutzer-neu", [name, email]);
+    if (!email) { return; }
+    var passwort = window.prompt("Passwort", "");
+    if (!passwort) { return; }
+    postToServer("benutzer-neu", [name, email, passwort]);
 }
 
 function benutzerBearbeiten(element) {
     var id = element.dataset.id;
     var name = window.prompt("Name", "");
+    if (!name) { return; }
     var email = window.prompt("E-Mail", "");
+    if (!email) { return; }
     postToServer("benutzer-neu", [id, name, email]);
 }
-
 
 function benutzerLoeschen() {
     postToServer("benutzer-loeschen", selected);
 }
 
-function bezirkNeu() {
-    var land = window.prompt("Bitte geben Sie das Land ein", "Brandenburg");
-    var amtsgericht = window.prompt("Bitte geben Sie das Amtsgericht ein", "Prenzlau");
-    var bezirk = window.prompt("Bitte geben Sie das Blatt ein", "Ludwigsburg");
-    postToServer("bezirk-neu", [land, amtsgericht, bezirk]);
+function getCsvValuesFromLine(line) {
+    var values = line[0].split(',');
+    value = values.map(function(value){
+        return value.replace(/\"/g, '');
+    });
+    return values;
+}
+
+function bezirkNeuVonCsv(event) {
+
+    var reader = new FileReader()
+    reader.onload = () => {
+        var lines = reader.result.split('\n');
+        var values = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            var line_elements = line.split(',');
+            for (let j = 0; j < line_elements.length; j++) {
+                const v = line_elements[j];
+                values.push(v);
+            }
+        }
+        console.log("post to server: ");
+        console.log(values);
+        postToServer("bezirk-neu", values);
+    }
+    console.log(event);
+    console.log(event.target);
+    reader.readAsBinaryString(event.files[0]);
 }
 
 function bezirkLoeschen() {
-    console.log("bezirk löschen");
     postToServer("bezirk-loeschen", selected);
 }
 

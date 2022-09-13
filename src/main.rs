@@ -229,12 +229,32 @@ pub struct BenutzerNeuArgsJson {
     pub schluessel: Option<GpgPublicKeyPair>,
 }
 
+// Aktion um Benutzerdaten zu ändern: None = nicht ändern
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BenutzerAendernArgs {
+    /// Neuer Name des neuen Benutzers
+    pub name: Option<String>,
+    /// Neue E-Mail des neuen Benutzers
+    pub email: Option<String>,
+    /// Neues Passwort des neuen Benutzers
+    pub passwort: Option<String>,
+    /// Neue Rechte (Typ) des neuen Benutzers
+    pub rechte: Option<String>,
+    /// Neuer öffentlicher Schlüssel (public key)
+    pub schluessel: Option<String>,
+}
+
 #[derive(clap::Parser, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[clap(author, version, about, long_about = None)]
 pub struct BenutzerLoeschenArgs {
     /// E-Mail des Benutzers, der gelöscht werden soll
     #[clap(short, long)]
     pub email: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BezirkeNeuArgs {
+    pub bezirke: Vec<BezirkNeuArgs>,
 }
 
 #[derive(clap::Parser, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -251,6 +271,11 @@ pub struct BezirkNeuArgs {
     /// Name des neuen Grundbuchbezirks
     #[clap(short, long)]
     pub bezirk: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BezirkeLoeschenArgs {
+    pub ids: Vec<String>,
 }
 
 #[derive(clap::Parser, Debug, Clone, PartialEq, Serialize, Deserialize)]

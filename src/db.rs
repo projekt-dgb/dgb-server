@@ -3,7 +3,7 @@
 use crate::{
     api::{pull::{PullResponse, PullResponseError}, index::ZugriffTyp},
     models::{get_data_dir, get_db_path, AbonnementInfo, BenutzerInfo, PdfFile},
-    MountPoint,
+    MountPoint, BezirkNeuArgs,
 };
 use chrono::{DateTime, Utc};
 use git2::Repository;
@@ -151,6 +151,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS bezirke (
+            id              VARCHAR(255) NOT NULL,
             land            VARCHAR(255) NOT NULL,
             amtsgericht     VARCHAR(255) NOT NULL,
             bezirk          VARCHAR(255) NOT NULL
@@ -182,15 +183,83 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+pub fn bezirke_einfuegen(
+    mount_point: MountPoint,
+    bezirke: &[BezirkNeuArgs],
+) -> Result<(), String> {
+
+    let mut conn = Connection::open(get_db_path(mount_point))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let tx = conn.transaction()
+    .map_err(|e| format!("Fehler beim Erstellen der Transaktion: {e}"))?;
+
+    tx.execute("DELETE FROM bezirke", rusqlite::params![])
+    .map_err(|e| format!("Fehler beim Einfügen von Bezirken in Datenbank: {e}"))?;
+    
+    // https://stackoverflow.com/questions/1609637
+    for (i, row) in bezirke.iter().enumerate() {
+        
+        let land = row.land.replace("\"", "").replace("\'", "");
+        let id = crate::db::generate_token().0;
+        let land = match Bundesland::from_code(&land) {
+            Some(s) => s,
+            None => match Bundesland::from_string(&land) {
+                Some(s) => s,
+                None => {
+                    return Err(format!("Ungültiges Bundesland in Zeile {i}"));
+                }
+            },
+        };
+
+        let amtsgericht = row.amtsgericht.replace("\"", "").replace("\'", "");
+        let bezirk = row.bezirk.replace("\"", "").replace("\'", "");
+
+        tx.execute(
+            "INSERT INTO bezirke (id, land, amtsgericht, bezirk) VALUES (?1, ?2, ?3, ?4)", 
+            rusqlite::params![id, land.into_code(), amtsgericht, bezirk]
+        ).map_err(|e| format!("Fehler beim Einfügen von Zeile {i} in Datenbank: {e}"))?; 
+    }
+    
+    tx.commit()
+    .map_err(|e| format!("Fehler beim Einfügen von Bezirken in Datenbank: {e}"))?;
+
+    Ok(())
+}
+
+pub fn bezirke_loeschen(
+    mount_point: MountPoint,
+    ids: &[String],
+) -> Result<(), String> {
+
+    let conn = Connection::open(get_db_path(mount_point))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let value = std::rc::Rc::new(
+        ids.iter().map(|s| rusqlite::types::Value::Text(s.clone())).collect::<Vec<_>>()
+    );
+
+    println!("lösche ids {ids:?}");
+    
+    conn.execute(
+        "DELETE FROM bezirke WHERE id IN (?1)",
+        rusqlite::params![value],
+    )
+    .map_err(|e| format!("Fehler beim Löschen von Bezirken in Datenbank: {e}"))?;
+    
+    Ok(())
+}
+
 pub fn create_gemarkung(
     mount_point: MountPoint,
     land: &str,
     amtsgericht: &str,
     bezirk: &str,
 ) -> Result<(), String> {
-    let land = match Bundesland::from_code(land) {
+    let land = land.replace("\"", "").replace("\'", "");
+    let land = match Bundesland::from_code(&land) {
         Some(s) => s,
-        None => match Bundesland::from_string(land) {
+        None => match Bundesland::from_string(&land) {
             Some(s) => s,
             None => {
                 return Err(format!("Ungültiges Bundesland"));
@@ -201,9 +270,11 @@ pub fn create_gemarkung(
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
+    let id = crate::db::generate_token().0;
+
     conn.execute(
-        "INSERT INTO bezirke (land, amtsgericht, bezirk) VALUES (?1, ?2, ?3)",
-        rusqlite::params![land.into_code(), amtsgericht, bezirk],
+        "INSERT INTO bezirke (id, land, amtsgericht, bezirk) VALUES (?1, ?2, ?3)",
+        rusqlite::params![id, land.into_code(), amtsgericht, bezirk],
     )
     .map_err(|e| {
         format!(
@@ -526,6 +597,18 @@ pub fn create_user(
     Ok(())
 }
 
+pub fn change_user(
+    mount_point: MountPoint,
+    name: Option<&str>,
+    email: Option<&str>,
+    passwort: Option<&str>,
+    rechte: Option<&str>,
+    pubkey: Option<&str>,
+) -> Result<(), String> {
+    println!("change user {name:?}");
+    Ok(())
+}
+
 fn hash_password(password: &str) -> [u8; PASSWORD_LEN] {
     use sodiumoxide::crypto::pwhash::argon2id13;
     use sodiumoxide::crypto::pwhash::argon2id13::HashedPassword;
@@ -824,7 +907,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
             );
 
             let mut stmt = conn
-                .prepare("SELECT land, amtsgericht, bezirk FROM bezirke")
+                .prepare("SELECT id, land, amtsgericht, bezirk FROM bezirke")
                 .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 3"))?;
 
             let bezirke = stmt
@@ -833,6 +916,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                         row.get::<usize, String>(0)?,
                         row.get::<usize, String>(1)?,
                         row.get::<usize, String>(2)?,
+                        row.get::<usize, String>(3)?,
                     ))
                 })
                 .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
@@ -842,6 +926,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 "bezirke".to_string(),
                 KontoTabelle {
                     spalten: vec![
+                        "id".to_string(),
                         "land".to_string(),
                         "amtsgericht".to_string(),
                         "bezirk".to_string(),
@@ -851,10 +936,10 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                         .enumerate()
                         .filter_map(|(i, row)| {
                             let row = row.ok()?;
-                            let bundesland = Bundesland::from_code(&row.0)?.into_str().to_string();
+                            let bundesland = Bundesland::from_code(&row.1)?.into_str().to_string();
                             Some((
                                 format!("{i}"),
-                                vec![bundesland, row.1.clone(), row.2.clone()],
+                                vec![row.0.clone(), bundesland, row.2.clone(), row.3.clone()],
                             ))
                         })
                         .collect(),
@@ -1228,6 +1313,52 @@ pub fn get_user_from_token(token: &str) -> Result<BenutzerInfo, String> {
         email: email.to_string(),
         rechte: rechte.to_string(),
     })
+}
+
+pub fn zugriff_ablehnen(
+    mount_point: MountPoint,
+    ids: &[String],
+    email: &str,
+    datum: &str,
+) -> Result<(), String> {
+
+    let conn = Connection::open(get_db_path(mount_point))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let ids = std::rc::Rc::new(
+        ids.iter().map(|s| rusqlite::types::Value::Text(s.clone())).collect::<Vec<_>>()
+    );
+
+    conn.execute(
+        "UPDATE zugriffe SET gewaehrt_von = NULL, abgelehnt_von = ?1, am = ?2 WHERE id IN (?3)",
+        rusqlite::params![email, datum, ids],
+    )
+    .map_err(|e| format!("Fehler beim Genehmigen vom Zugriffen: {e}"))?;
+
+    Ok(())
+}
+
+pub fn zugriff_genehmigen(
+    mount_point: MountPoint,
+    ids: &[String],
+    email: &str,
+    datum: &str,
+) -> Result<(), String> {
+
+    let conn = Connection::open(get_db_path(mount_point))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let ids = std::rc::Rc::new(
+        ids.iter().map(|s| rusqlite::types::Value::Text(s.clone())).collect::<Vec<_>>()
+    );
+
+    conn.execute(
+        "UPDATE zugriffe SET abgelehnt_von = NULL, gewaehrt_von = ?1, am = ?2 WHERE id IN (?3)",
+        rusqlite::params![email, datum, ids],
+    )
+    .map_err(|e| format!("Fehler beim Genehmigen vom Zugriffen: {e}"))?;
+
+    Ok(())
 }
 
 pub fn create_zugriff(
