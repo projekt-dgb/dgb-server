@@ -232,21 +232,25 @@ pub fn bezirke_loeschen(
     ids: &[String],
 ) -> Result<(), String> {
 
-    let conn = Connection::open(get_db_path(mount_point))
+    let mut conn = Connection::open(get_db_path(mount_point))
         .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    let value = std::rc::Rc::new(
-        ids.iter().map(|s| rusqlite::types::Value::Text(s.clone())).collect::<Vec<_>>()
-    );
-
-    println!("lösche ids {ids:?}");
-    
-    conn.execute(
-        "DELETE FROM bezirke WHERE id IN (?1)",
-        rusqlite::params![value],
-    )
+    let tx = conn.transaction()
     .map_err(|e| format!("Fehler beim Löschen von Bezirken in Datenbank: {e}"))?;
-    
+
+    for id in ids.iter() {
+        tx.execute(
+            "DELETE FROM bezirke WHERE id = ?1",
+            rusqlite::params![id.clone()],
+        )
+        .map_err(|e| format!("Fehler beim Löschen von Bezirken in Datenbank: {e}"))?;
+    }
+
+    tx.commit()
+    .map_err(|e| format!("Fehler beim Löschen von Bezirken in Datenbank: {e}"))?;
+
+    println!("transaction commit ok (bezirke gelöscht)");
+
     Ok(())
 }
 
@@ -1322,17 +1326,21 @@ pub fn zugriff_ablehnen(
     datum: &str,
 ) -> Result<(), String> {
 
-    let conn = Connection::open(get_db_path(mount_point))
-    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    let mut conn = Connection::open(get_db_path(mount_point))
+    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    let ids = std::rc::Rc::new(
-        ids.iter().map(|s| rusqlite::types::Value::Text(s.clone())).collect::<Vec<_>>()
-    );
+    let tx = conn.transaction()
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank: {e}"))?;
 
-    conn.execute(
-        "UPDATE zugriffe SET gewaehrt_von = NULL, abgelehnt_von = ?1, am = ?2 WHERE id IN (?3)",
-        rusqlite::params![email, datum, ids],
-    )
+    for id in ids.iter() {
+        tx.execute(
+            "UPDATE zugriffe SET gewaehrt_von = NULL, abgelehnt_von = ?1, am = ?2 WHERE id  = ?3",
+            rusqlite::params![email.clone(), datum.clone(), id.clone()],
+        )
+        .map_err(|e| format!("Fehler beim Genehmigen vom Zugriffen: {e}"))?;
+    }
+
+    tx.commit()
     .map_err(|e| format!("Fehler beim Genehmigen vom Zugriffen: {e}"))?;
 
     Ok(())
@@ -1345,18 +1353,22 @@ pub fn zugriff_genehmigen(
     datum: &str,
 ) -> Result<(), String> {
 
-    let conn = Connection::open(get_db_path(mount_point))
+    let mut conn = Connection::open(get_db_path(mount_point))
     .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    let ids = std::rc::Rc::new(
-        ids.iter().map(|s| rusqlite::types::Value::Text(s.clone())).collect::<Vec<_>>()
-    );
+    let tx = conn.transaction()
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    conn.execute(
-        "UPDATE zugriffe SET abgelehnt_von = NULL, gewaehrt_von = ?1, am = ?2 WHERE id IN (?3)",
-        rusqlite::params![email, datum, ids],
-    )
-    .map_err(|e| format!("Fehler beim Genehmigen vom Zugriffen: {e}"))?;
+    for id in ids.iter() {
+        tx.execute(
+            "UPDATE zugriffe SET abgelehnt_von = NULL, gewaehrt_von = ?1, am = ?2 WHERE id = ?3",
+            rusqlite::params![email.clone(), datum.clone(), id.clone()],
+        )
+        .map_err(|e| format!("Fehler beim Genehmigen vom Zugriffen: {e}"))?;
+    }
+    
+    tx.commit()
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     Ok(())
 }
@@ -1562,19 +1574,25 @@ pub fn get_public_key(email: &str, fingerprint: &str) -> Result<String, String> 
 }
 
 pub fn delete_user(mount_point: MountPoint, email: &str) -> Result<(), String> {
-    let conn = Connection::open(get_db_path(mount_point))
+    let mut conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    conn.execute(
+    let tx = conn.transaction()
+    .map_err(|e| format!("Fehler beim Löschen von Benutzer: {e}"))?;
+
+    tx.execute(
         "DELETE FROM benutzer WHERE email = ?1",
         rusqlite::params![email],
     )
     .map_err(|e| format!("Fehler beim Löschen von Benutzer: {e}"))?;
 
-    conn.execute(
+    tx.execute(
         "DELETE FROM publickeys WHERE email = ?1",
         rusqlite::params![email],
     )
+    .map_err(|e| format!("Fehler beim Löschen von Benutzer: {e}"))?;
+
+    tx.commit()
     .map_err(|e| format!("Fehler beim Löschen von Benutzer: {e}"))?;
 
     Ok(())

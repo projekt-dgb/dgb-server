@@ -363,11 +363,11 @@ function renderRows(id) {
 
             if (angefragt != "" && gewaehrt_von != "") {
                 var am = new Date(Date.parse(am)).toLocaleDateString("de-DE", options);
-                status = "Gewährt von" + gewaehrt_von;
+                status = "Gewährt von " + gewaehrt_von;
                 line2 = "am " + am;
             } else if (angefragt != "" && abgelehnt_von != "") {
                 var am = new Date(Date.parse(am)).toLocaleDateString("de-DE", options);
-                status = "Abgelehnt von" + abgelehnt_von;
+                status = "Abgelehnt von " + abgelehnt_von;
                 line2 = "am " + am;
             }
 

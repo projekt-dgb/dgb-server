@@ -52,6 +52,8 @@ pub(crate) async fn write_to_root_db(
     if !app_state.k8s_aktiv() {
         let result = crate::api::commit::db_change_inner(&change, app_state);
 
+        println!("result: {:?}", result);
+
         crate::db::pull_db().await.map_err(|e| {
             format!(
                 "Fehler beim Synchronisieren der Datenbanken (pull): {}: {}",
@@ -1129,7 +1131,7 @@ pub mod commit {
                 crate::db::zugriff_genehmigen(mount_point_write, ids, email, datum)
             },
             DbChangeOp::ZugriffAblehnen { ids, email, datum } => {
-                crate::db::zugriff_genehmigen(mount_point_write, ids, email, datum)
+                crate::db::zugriff_ablehnen(mount_point_write, ids, email, datum)
             }
             DbChangeOp::BenutzerSessionNeu {
                 email,
@@ -1164,7 +1166,10 @@ pub mod commit {
 
         match db_change_inner(change_op, app_state) {
             Ok(()) => Ok(response_ok()),
-            Err(e) => Err(response_err(500, e)),
+            Err(e) => {
+                println!("error in db: {e}");
+                Err(response_err(500, e))
+            },
         }
     }
 }
