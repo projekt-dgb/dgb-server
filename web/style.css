@@ -5,6 +5,58 @@
     color: black;
 }
 
+button {
+    cursor: pointer;
+}
+
+input[type="file"] {
+    display: none;
+}
+
+.custom-file-upload {
+    appearance: auto;
+    writing-mode: horizontal-tb !important;
+    font-style: ;
+    font-variant-ligatures: ;
+    font-variant-caps: ;
+    font-variant-numeric: ;
+    font-variant-east-asian: ;
+    font-weight: ;
+    font-stretch: ;
+    font-size: ;
+    font-family: ;
+    text-rendering: auto;
+    color: buttontext;
+    letter-spacing: normal;
+    word-spacing: normal;
+    line-height: normal;
+    text-transform: none;
+    text-indent: 0px;
+    text-shadow: none;
+    display: inline-block;
+    text-align: center;
+    align-items: flex-start;
+    cursor: default;
+    box-sizing: border-box;
+    background-color: buttonface;
+    margin: 0em;
+    padding: 1px 6px;
+    border-width: 2px;
+    border-style: outset;
+    border-color: buttonborder;
+    border-image: initial;
+
+    text-decoration: none;
+    color: black;
+
+    padding: 0px 5px;
+    margin: 7px 10px;
+    cursor: pointer;
+    font-size: 0.75em;
+    border-radius: 3px;
+    user-select: none;
+}
+
 body {
     -ms-text-size-adjust: 100%;
     -webkit-text-size-adjust: 100%;
@@ -232,6 +284,11 @@ button {
     display: flex;
     flex-grow: 1;
     flex-direction: row;
+}
+
+#main-table-data > div > div p,
+#main-table-data > div > div input[type="text"] {
+    font-size: 0.8rem;
 }
 
 .row-cell {

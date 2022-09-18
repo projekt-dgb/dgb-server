@@ -20,15 +20,15 @@ if (kontotyp == "admin") {
     ]
 } else if (kontotyp == "gast") {
     sidebar_items = [
-        "Meine Grundbuchblätter",
-        "Meine Abonnements",
+        "Grundbuchblätter",
+        "Abonnements",
         "Einstellungen",
     ]
 } else if (kontotyp == "bearbeiter") {
     sidebar_items = [
-        "Meine Änderungen",
-        "Meine Grundbuchblätter",
-        "Meine Abonnements",
+        "Änderungen",
+        "Grundbuchblätter",
+        "Abonnements",
         "Einstellungen",
     ]
 }
@@ -121,7 +121,7 @@ function selectAllVisible() {
         var row = activeSection.daten[e];
         if (!rowIsValid(row, filter_by)) { continue; }
         if (kontotyp == "admin" && active_section == "aenderungen") {
-            var aenderung_id = row[1];
+            var aenderung_id = row[0];
             selected.push(aenderung_id);
         } else if (kontotyp == "admin" && active_section == "zugriffe") {
             var zugriff_id = row[0];
@@ -181,6 +181,7 @@ function renderHeader(id) {
 
     var header_column_node = document.createElement("div");
     var check_uncheck_all_node_div = document.createElement("div");
+    check_uncheck_all_node_div.style.flexDirection = "column";
     check_uncheck_all_node_div.style.padding = "5px 10px";
     check_uncheck_all_node_div.style.flexGrow = "0";
     check_uncheck_all_node_div.style.maxWidth = "18px";
@@ -258,22 +259,24 @@ function renderRows(id) {
     var kontoDaten = getKontoDaten();
     var keys = Object.keys(kontoDaten.data[id].daten);
     // sort_by(keys, filter_by)
-    for (var i = 0; i < keys.length; i++) {
-        var e = keys[i];
+    for (var q = 0; q < keys.length; q++) {
+        var e = keys[q];
         var row = kontoDaten.data[id].daten[e];
         if (!rowIsValid(row, filter_by)) { continue; }
         var row_node = document.createElement("div");
         row_node.dataset.index = e;
 
-        if (kontotyp == "admin" && id == "aenderungen") {
+        if ((kontotyp == "admin" && id == "aenderungen") ||
+           (kontotyp == "bearbeiter" && id == "aenderungen")) {
 
-            var aenderung_id = row[1];
+            var aenderung_id = row[0];
             var aenderung_name = row[1];
             var aenderung_email = row[2];
             var titel = row[6];
             var beschreibung = row[7];
 
             var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
             check_uncheck_all_node_div.style.padding = "5px 10px";
             check_uncheck_all_node_div.style.flexGrow = "0";
             check_uncheck_all_node_div.style.maxWidth = "18px";
@@ -304,15 +307,32 @@ function renderRows(id) {
             cell_node.style.minWidth = "50%";
             cell_node.style.maxWidth = "50%";
 
-            var cell_text = document.createElement("p");
-            var textnode1 = document.createTextNode(aenderung_name);
-            cell_text.appendChild(textnode1);
-            cell_node.appendChild(cell_text);
+            var cell_text1 = document.createElement("p");
+            cell_text1.style.fontFamily = "monospace";
 
-            var cell_text = document.createElement("p");
+            var cell_text = document.createElement("a");
+            var textnode1 = document.createTextNode(aenderung_id.substr(0, 6));
+            cell_text.style.textDecoration = "underline";
+            cell_text.href = "/aenderung/pdf/" + aenderung_id;
+            cell_text.target = "_blank";
+            cell_text.appendChild(textnode1);
+            cell_text1.appendChild(cell_text);
+
+            var textnode1 = document.createTextNode(" " + aenderung_name + " <");
+            cell_text1.appendChild(textnode1);
+            
+            var cell_text = document.createElement("a");
+            cell_text.style.textDecoration = "underline";
+            cell_text.href = "mailto:" + aenderung_email;
             var textnode1 = document.createTextNode(aenderung_email);
             cell_text.appendChild(textnode1);
-            cell_node.appendChild(cell_text);
+            cell_text1.appendChild(cell_text);
+
+            var cell_text2 = document.createElement("p");
+            var textnode2 = document.createTextNode(">");
+            cell_text1.appendChild(textnode2);
+
+            cell_node.appendChild(cell_text1);
 
             non_check_node.appendChild(cell_node);
 
@@ -323,14 +343,9 @@ function renderRows(id) {
             cell_node.style.maxWidth = "50%";
 
             var cell_text = document.createElement("p");
+            cell_text.style.fontFamily = "monospace";
             cell_node.classList.add("aenderung-titel");
-            var textnode1 = document.createTextNode(titel);
-            cell_text.appendChild(textnode1);
-            cell_node.appendChild(cell_text);
-
-            var cell_text = document.createElement("p");
-            cell_node.classList.add("aenderung-beschreibung");
-            var textnode1 = document.createTextNode(beschreibung);
+            var textnode1 = document.createTextNode(titel.substr(0, 70));
             cell_text.appendChild(textnode1);
             cell_node.appendChild(cell_text);
 
@@ -372,6 +387,7 @@ function renderRows(id) {
             }
 
             var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
             check_uncheck_all_node_div.style.padding = "5px 10px";
             check_uncheck_all_node_div.style.flexGrow = "0";
             check_uncheck_all_node_div.style.maxWidth = "18px";
@@ -482,10 +498,11 @@ function renderRows(id) {
             var benutzer_name = row[0]; 
             var benutzer_email = row[1]; 
             var benutzer_rechte = row[2]; 
-            var pubkey_fingerprint = row[3]; 
-            var pubkey = row[4]; 
+            var pubkey_fingerprint = row[4]; 
+            var pubkey = row[3]; 
 
             var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
             check_uncheck_all_node_div.style.padding = "5px 10px";
             check_uncheck_all_node_div.style.flexGrow = "0";
             check_uncheck_all_node_div.style.maxWidth = "18px";
@@ -540,10 +557,28 @@ function renderRows(id) {
             cell_node.style.minWidth = "25%";
             cell_node.style.maxWidth = "25%";
 
-            var cell_text = document.createElement("p");
-            var textnode1 = document.createTextNode(benutzer_rechte);
-            cell_text.appendChild(textnode1);
+            var cell_text = document.createElement("select");
+            cell_text.dataset.id = benutzer_email; 
+            cell_text.onchange = function() { benutzerBearbeiten(this); };
+
+            var select_values = [
+                "admin",
+                "bearbeiter",
+                "gast",
+            ];
+
+            // Create and append the options
+            for (var i = 0; i < select_values.length; i++) {
+                var option = document.createElement("option");
+                option.value = select_values[i];
+                option.text = select_values[i];
+                if (select_values[i] == benutzer_rechte) {
+                    option.selected = true;
+                }
+                cell_text.appendChild(option);
+            }
             cell_node.appendChild(cell_text);
+            cell_node.style.alignSelf = "center";
 
             non_check_node.appendChild(cell_node);
 
@@ -555,8 +590,16 @@ function renderRows(id) {
 
             var cell_text = document.createElement("button");
             cell_text.textContent = "Öffentlicher Schlüssel";
-            if (pubkey == "") {
+            cell_text.dataset.email = benutzer_email;
+            cell_text.dataset.name = benutzer_name;
+
+            if (pubkey_fingerprint == "") {
                 cell_text.textContent = "Schlüsselpaar generieren";
+                cell_text.onclick = function() { generiereSchluesselPaar(this); }
+            } else {
+                console.log(pubkey_fingerprint);
+                console.log(pubkey_fingerprint.substr(0, 6));
+                cell_text.textContent = "Schlüssel " + pubkey_fingerprint.substr(0, 6) + "";
             }
             cell_node.appendChild(cell_text);
 
@@ -572,6 +615,7 @@ function renderRows(id) {
             var bezirk = row[3];
 
             var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
             check_uncheck_all_node_div.style.padding = "5px 10px";
             check_uncheck_all_node_div.style.flexGrow = "0";
             check_uncheck_all_node_div.style.maxWidth = "18px";
@@ -634,8 +678,13 @@ function renderRows(id) {
 
             row_node.appendChild(non_check_node);
         } else if (kontotyp == "admin" && id == "meine-kontodaten") {
-            
+
+            var einstellung_id = e;
+            var einstellung = row[1];
+            var wert = row[2];
+
             var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
             check_uncheck_all_node_div.style.padding = "5px 10px";
             check_uncheck_all_node_div.style.flexGrow = "0";
             check_uncheck_all_node_div.style.maxWidth = "18px";
@@ -644,16 +693,113 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
+            check_node.dataset.id = einstellung_id;
+            check_node.checked = selected.includes(einstellung_id);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
             check_uncheck_all_node_div.appendChild(check_node);
             row_node.appendChild(check_uncheck_all_node_div);
 
             var non_check_node = document.createElement("div");
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "50%";
+            cell_node.style.minWidth = "50%";
+            cell_node.style.maxWidth = "50%";
+
+            var cell_text = document.createElement("p");
+            var textnode1 = document.createTextNode(einstellung);
+            cell_text.appendChild(textnode1);
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
+            var cell_node = document.createElement("div");
+            cell_node.classList.add("row-cell");
+            cell_node.style.width = "50%";
+            cell_node.style.minWidth = "50%";
+            cell_node.style.maxWidth = "50%";
+
+            var cell_text = document.createElement("input");
+            cell_text.value = wert;
+            cell_text.dataset.id = einstellung_id;
+            cell_text.onchange = function() { editConfigValue(this); }
+            cell_node.appendChild(cell_text);
+
+            non_check_node.appendChild(cell_node);
+
             row_node.appendChild(non_check_node);
         }
 
         node_data.appendChild(row_node);
     }
     return node_data;
+}  
+
+function editConfigValue(target) {
+    var target_id = target.dataset.id;
+    if (!target) {
+        return;
+    }
+    postToServer("konfiguration-bearbeiten", [target_id, target.value]);
+}
+
+function saveFile(fileName,urlFile){
+    let a = document.createElement("a");
+    a.style = "display: none";
+    document.body.appendChild(a);
+    a.href = urlFile;
+    a.download = fileName;
+    a.click();
+    window.URL.revokeObjectURL(urlFile);
+    a.remove();
+}
+
+function generiereSchluesselPaar(target) {
+    var email = target.dataset.email;
+    var name = target.dataset.name;
+    var auth = document.getElementById("token-id").dataset.tokenId;
+    if (!auth) {
+        return;
+    }
+
+    var http = new XMLHttpRequest();
+    http.open('POST', '/konto-generiere-schluessel', true);
+    http.setRequestHeader('Content-type', 'application/json');
+    http.onreadystatechange = function() {
+        if (http.readyState == 4 && http.status == 200) {
+            var object = JSON.parse(http.responseText);
+            if (object.status == "ok") {
+                var privatekey = object.private.join('\r\n');
+                var blobData = new Blob([privatekey], {type: "text/plain"});
+                var url = window.URL.createObjectURL(blobData);
+                saveFile("privat-" + name + "-" + object.fingerprint.substr(0, 6) + ".txt", url);
+                
+                try {
+                    var publickey = object.public.join('\r\n');
+                    var blobData2 = new Blob([publickey], {type: "text/plain"});
+                    var url2 = window.URL.createObjectURL(blobData2);
+                    saveFile("public-" + name + "-" + object.fingerprint.substr(0, 6) + ".txt", url2);      
+                } catch (error) { }
+
+                postToServer("benutzer-bearbeite-pubkey", [email, object.public.join('\r\n')]);
+
+            } else if (object.status == "error") {
+                console.error("" + object.code + ": " + object.text);
+            }
+        }
+    }
+    http.send(JSON.stringify({
+        auth: auth,
+        name: name,
+        email: email,
+    }));
 }
 
 function renderActions(id) {
@@ -670,21 +816,11 @@ function renderActions(id) {
         ablehnen.textContent = "Zugriff ablehnen";
         ablehnen.onclick = function() { zugriffAblehnen(); }
         actions_data.appendChild(ablehnen);
-
-        var zurueckziehen = document.createElement("button");
-        zurueckziehen.textContent = "Zugriff zurückziehen";
-        zurueckziehen.onclick = function() { zugriffZurueckziehen(); }
-        actions_data.appendChild(zurueckziehen);
     } else if (kontotyp == "admin" && id == "benutzer") {
 
         var change = document.createElement("button");
         change.textContent = "Neuen Benutzer anlegen";
         change.onclick = function(){ benutzerNeu(); };
-        actions_data.appendChild(change);
-    
-        var change = document.createElement("button");
-        change.textContent = "Benutzer bearbeiten";
-        change.onclick = function() { benutzerBearbeiten(this); }
         actions_data.appendChild(change);
 
         var loeschen = document.createElement("button");
@@ -692,11 +828,16 @@ function renderActions(id) {
         loeschen.onclick = function() { benutzerLoeschen(); }
         actions_data.appendChild(loeschen);
     } else if (kontotyp == "admin" && id == "bezirke") {
+        var bezirk_new = document.createElement("label");
+        bezirk_new.htmlFor = "bezirke-von-csv-laden";
+        bezirk_new.textContent = "Bezirke von CSV laden";
+        bezirk_new.classList.add("custom-file-upload");
+        bezirk_new.onchange = function() { bezirkNeuVonCsv(this); }
+        actions_data.appendChild(bezirk_new);
 
         var bezirk_new = document.createElement("input");
         bezirk_new.type = "file";
-        bezirk_new.textContent = "Bezirke von CSV laden";
-        bezirk_new.onchange = function() { bezirkNeuVonCsv(this); }
+        bezirk_new.id = "bezirke-von-csv-laden";
         actions_data.appendChild(bezirk_new);
 
         var loeschen = document.createElement("button");
@@ -762,6 +903,20 @@ function zugriffAblehnen() {
     postToServer("zugriff-ablehnen", selected);
 }
 
+function benutzerBearbeiten(target) {
+    var value = target.value;
+    var s = target.options[target.selectedIndex].text;
+    if (!s) {
+        return;
+    }
+    var target_ids = [s, target.dataset.id];
+    for (var i = 0; i < selected.length; i++) {
+        const s = selected[i];
+        target_ids.push(s);
+    }
+    postToServer("benutzer-bearbeite-kontotyp", target_ids);
+}
+
 function benutzerNeu() {
     var name = window.prompt("Name", "");
     if (!name) { return; }
@@ -770,15 +925,6 @@ function benutzerNeu() {
     var passwort = window.prompt("Passwort", "");
     if (!passwort) { return; }
     postToServer("benutzer-neu", [name, email, passwort]);
-}
-
-function benutzerBearbeiten(element) {
-    var id = element.dataset.id;
-    var name = window.prompt("Name", "");
-    if (!name) { return; }
-    var email = window.prompt("E-Mail", "");
-    if (!email) { return; }
-    postToServer("benutzer-neu", [id, name, email]);
 }
 
 function benutzerLoeschen() {
@@ -807,12 +953,8 @@ function bezirkNeuVonCsv(event) {
                 values.push(v);
             }
         }
-        console.log("post to server: ");
-        console.log(values);
         postToServer("bezirk-neu", values);
     }
-    console.log(event);
-    console.log(event.target);
     reader.readAsBinaryString(event.files[0]);
 }
 

@@ -52,8 +52,6 @@ pub(crate) async fn write_to_root_db(
     if !app_state.k8s_aktiv() {
         let result = crate::api::commit::db_change_inner(&change, app_state);
 
-        println!("result: {:?}", result);
-
         crate::db::pull_db().await.map_err(|e| {
             format!(
                 "Fehler beim Synchronisieren der Datenbanken (pull): {}: {}",
@@ -516,7 +514,7 @@ pub mod konto {
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
 
-    use crate::{db::KontoData, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs};
+    use crate::{db::{KontoData, GpgKeyPair}, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs};
 
     // Konto-Seite
     #[get("/konto")]
@@ -581,6 +579,68 @@ pub mod konto {
         text: String,
     }
 
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "status")]
+    enum KontoGeneriereSchluesselPostResponse {
+        #[serde(rename = "ok")]
+        Ok(GpgKeyPair),
+        #[serde(rename = "error")]
+        Error(KontoGeneriereSchluesselPostResponseError),
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct KontoGeneriereSchluesselPostResponseError {
+        code: usize,
+        text: String,
+    }
+
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct KontoGeneriereSchluessel {
+        auth: String,
+        email: String,
+        name: String,    
+    }
+
+    #[post("/konto-generiere-schluessel")]
+    async fn konto_generiere_schluessel(_: HttpRequest, state: web::Data<AppState>, data: web::Json<KontoGeneriereSchluessel>) -> impl Responder {
+        let result =  match konto_generiere_schluessel_inner(&*state, &*data).await {
+            Ok(o) => KontoGeneriereSchluesselPostResponse::Ok(o),
+            Err(e) => KontoGeneriereSchluesselPostResponse::Error(e),
+        };
+
+        HttpResponse::Ok()
+        .content_type("application/json")
+        .body(serde_json::to_string(&result).unwrap_or_default())
+    }
+    
+    async fn konto_generiere_schluessel_inner(
+        app_state: &AppState, 
+        data: &KontoGeneriereSchluessel
+    ) -> Result<GpgKeyPair, KontoGeneriereSchluesselPostResponseError> {
+    
+        let benutzer = crate::db::get_user_from_token(&data.auth)
+        .map_err(|e| KontoGeneriereSchluesselPostResponseError {
+            code: 500,
+            text: e,
+        })?;
+
+        if benutzer.rechte != "admin" {
+            return Err(KontoGeneriereSchluesselPostResponseError {
+                code: 500,
+                text: "Cannot generate public key pair: Invalid authentication.".to_string(),
+            });
+        }
+
+        let pair = crate::db::create_gpg_key(&data.name, &data.email)
+            .map_err(|e| KontoGeneriereSchluesselPostResponseError {
+                code: 500,
+                text: format!("Cannot generate public key pair: Unknown error."),
+            })?;
+
+        Ok(pair)
+    }
+
     #[post("/konto")]
     async fn konto_post(_: HttpRequest, state: web::Data<AppState>, data: web::Json<KontoJsonPost>) -> impl Responder {
         let result =  match konto_post_inner(&*state, &*data).await {
@@ -599,15 +659,11 @@ pub mod konto {
         use crate::BenutzerAendernArgs;
         use crate::BezirkNeuArgs;
 
-        println!("data (konto): {:#?}", data);
-
         let benutzer = crate::db::get_user_from_token(&data.auth)
         .map_err(|e| KontoJsonPostResponseError {
             code: 500,
             text: e,
         })?;
-
-        println!("benutzer (konto): {:#?}", benutzer);
 
         match (benutzer.rechte.as_str(), data.aktion.as_str()) {
             ("admin", "benutzer-neu") => {
@@ -655,65 +711,51 @@ pub mod konto {
                         text: e,
                     })?;
             },
-            ("admin", "benutzer-bearbeiten") => {
-                let name = data.daten.get(0)
+            ("admin", "benutzer-bearbeite-kontotyp") => {
+                let neuer_kontotyp = data.daten.get(0)
                 .ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer neu anlegen: kein Name in Daten vorhanden".to_string(),
                 })?;
-                let name = if name.is_empty() {
-                    None
-                } else {
-                    Some(name.to_string())
-                };
-                let email = data.daten.get(1)
-                .ok_or(KontoJsonPostResponseError {
-                    code: 500,
-                    text: "Benutzer neu anlegen: keine E-Mail in Daten vorhanden".to_string(),
-                })?;
-                let email = if email.is_empty() {
-                    None
-                } else {
-                    Some(email.to_string())
-                };
-                let passwort = data.daten.get(2)
-                .ok_or(KontoJsonPostResponseError {
-                    code: 500,
-                    text: "Benutzer neu anlegen: kein Passwort in Daten vorhanden".to_string(),
-                })?;
-                let passwort = if passwort.is_empty() {
-                    None
-                } else {
-                    Some(passwort.to_string())
-                };
-                let rechte = data.daten.get(3)
-                .ok_or(KontoJsonPostResponseError {
-                    code: 500,
-                    text: "Benutzer neu anlegen: kein Recht in Daten vorhanden".to_string(),
-                })?;
-                let rechte = if rechte.is_empty() {
-                    None
-                } else {
-                    Some(rechte.to_string())
-                };
-                let schluessel = data.daten.get(4)
-                .ok_or(KontoJsonPostResponseError {
-                    code: 500,
-                    text: "Benutzer neu anlegen: kein Schlüssel in Daten vorhanden".to_string(),
-                })?;
-                let schluessel = if schluessel.is_empty() {
-                    None
-                } else {
-                    Some(schluessel.to_string())
-                };
 
-                crate::api::write_to_root_db(DbChangeOp::BenutzerAendern(BenutzerAendernArgs {
-                    name,
-                    email,
-                    passwort,
-                    rechte,
-                    schluessel,
-                }), &app_state)
+                let kontotypen = ["admin", "gast", "bearbeiter"];
+                if !kontotypen.iter().any(|k| *k == neuer_kontotyp) {
+                    return Err(KontoJsonPostResponseError {
+                        code: 500,
+                        text: "Benutzer-Kontotyp bearbeiten: Ungültiger Kontotyp".to_string(),
+                    });
+                }
+
+                let emails = data.daten.iter().skip(1).cloned().collect();
+
+                crate::api::write_to_root_db(DbChangeOp::BenutzerAendernRechte {
+                    neue_rechte: neuer_kontotyp.to_string(),
+                    ids: emails,
+                }, &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+            },
+            ("admin", "benutzer-bearbeite-pubkey") => {
+
+                let email = data.daten.get(0)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer PubKey ändern: keine E-Mail ID".to_string(),
+                })?;
+
+                let pubkey = data.daten.get(1)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer PubKey ändern: keine PubKey".to_string(),
+                })?;
+
+                crate::api::write_to_root_db(DbChangeOp::BenutzerAendernPubkey { 
+                    id: email.clone(), 
+                    neuer_pubkey: pubkey.clone(),
+                }, &app_state)
                     .await
                     .map_err(|e| KontoJsonPostResponseError {
                         code: 500,
@@ -776,6 +818,8 @@ pub mod konto {
                         code: 500,
                         text: e,
                     })?;
+                
+                // sende_email(&benutzer.email, zugriff_genehmigt)
             },
             ("admin", "zugriff-ablehnen") => {
                 crate::api::write_to_root_db(DbChangeOp::ZugriffAblehnen {
@@ -788,6 +832,21 @@ pub mod konto {
                         code: 500,
                         text: e,
                     })?;
+
+                // sende_email(&benutzer.email, zugriff_abgelehnt)
+            },
+            ("admin", "konfiguration-bearbeiten") => {
+                for pair in data.daten.chunks(2) {
+                    crate::api::write_to_root_db(DbChangeOp::BearbeiteEinstellung {
+                        id: pair[0].to_string(),
+                        neuer_wert: pair[1].to_string(),
+                    }, &app_state)
+                        .await
+                        .map_err(|e| KontoJsonPostResponseError {
+                            code: 500,
+                            text: e,
+                        })?;
+                }
             },
             _ => {
                 return Err(KontoJsonPostResponseError {
@@ -967,7 +1026,14 @@ pub mod commit {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub(crate) enum DbChangeOp {
         BenutzerNeu(BenutzerNeuArgsJson),
-        BenutzerAendern(BenutzerAendernArgs),
+        BenutzerAendernRechte {
+            ids: Vec<String>, 
+            neue_rechte: String,
+        },
+        BenutzerAendernPubkey {
+            id: String, 
+            neuer_pubkey: String,
+        },
         BenutzerLoeschen(BenutzerLoeschenArgs),
         BezirkNeu(BezirkNeuArgs),
         // Mehrere Bezirke gleichzeitig mit Datenbank abgleichen
@@ -1004,6 +1070,10 @@ pub mod commit {
             token: String,
             gueltig_bis: DateTime<Utc>,
         },
+        BearbeiteEinstellung {
+            id: String, 
+            neuer_wert: String,
+        }
     }
 
     #[post("/get-db")]
@@ -1050,6 +1120,13 @@ pub mod commit {
         };
 
         match change_op {
+            DbChangeOp::BearbeiteEinstellung {
+                id, neuer_wert,
+            } => crate::db::bearbeite_einstellung(
+                mount_point_write, 
+                id, 
+                neuer_wert
+            ),
             DbChangeOp::BenutzerNeu(un) => crate::db::create_user(
                 mount_point_write,
                 &un.name,
@@ -1058,13 +1135,21 @@ pub mod commit {
                 &un.rechte,
                 un.schluessel.clone(),
             ),
-            DbChangeOp::BenutzerAendern(a) => crate::db::change_user(
+            DbChangeOp::BenutzerAendernRechte { 
+                ids,
+                neue_rechte,
+            } => crate::db::bearbeite_benutzer_rechte(
                 mount_point_write,
-                a.name.as_ref().map(|s| s.as_str()),
-                a.email.as_ref().map(|s| s.as_str()),
-                a.passwort.as_ref().map(|s| s.as_str()),
-                a.rechte.as_ref().map(|s| s.as_str()),
-                a.schluessel.as_ref().map(|s| s.as_str()),
+                ids,
+                neue_rechte
+            ),
+            DbChangeOp::BenutzerAendernPubkey {
+                id, 
+                neuer_pubkey,
+            } => crate::db::bearbeite_benutzer_pubkey(
+                mount_point_write, 
+                id, 
+                neuer_pubkey,
             ),
             DbChangeOp::BezirkeLoeschen(b) => crate::db::bezirke_loeschen(
                 mount_point_write,
@@ -1921,6 +2006,32 @@ pub mod download {
         HttpResponse::Ok()
             .content_type("application/pdf")
             .body(pdf_bytes)
+    }
+
+    #[get("/aenderung/pdf/{id}")]
+    async fn dowload_aenderung_pdf(
+        path: web::Path<String>,
+        req: HttpRequest,
+    ) -> impl Responder {
+        let (_token, _) = match super::get_benutzer_from_httpauth(&req).await {
+            Ok(o) => o,
+            Err(e) => {
+                return e;
+            }
+        };
+
+        let pdf_bytes = generate_diff(&path);
+
+        HttpResponse::Ok()
+            .content_type("application/pdf")
+            .body(pdf_bytes)
+    }
+
+    fn generate_diff(id: &str) -> Vec<u8> {
+        use printpdf::{PdfDocument, Mm};
+        let titel = format!("Diff with ID {id}");
+        let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Titelblatt");
+        doc.save_to_bytes().unwrap_or_default()
     }
 
     fn generate_pdf(gb: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<u8> {

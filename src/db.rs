@@ -180,7 +180,147 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS einstellungen (
+            id              VARCHAR(255) NOT NULL,
+            benutzer        INTEGER NOT NULL,
+            einstellung     VARCHAR(1023) NOT NULL,
+            wert            STRING NOT NULL
+        )",
+        [],
+    )?;
+
+    seed_benutzer_einstellungen(mount_point)?;
+
     Ok(())
+}
+
+
+pub fn edit_benutzer_einstellungen(
+    mount_point: MountPoint,
+    benutzer: &BenutzerInfo,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+
+    let mut conn = Connection::open(get_db_path(mount_point))
+    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+
+
+    Ok(())
+}
+
+pub fn bearbeite_einstellung(
+    mount_point: MountPoint,
+    einstellung_id: &str, 
+    neuer_wert: &str,
+)  -> Result<(), String> {
+
+    let mut conn = Connection::open(get_db_path(mount_point))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    conn
+        .execute(
+            "UPDATE einstellungen SET wert = ?2 WHERE id = ?1", 
+            rusqlite::params![einstellung_id, neuer_wert]
+        ).map_err(|_| format!("Fehler beim Bearbeiten der Einstellungen"))?;
+
+    Ok(())
+}
+
+pub fn seed_benutzer_einstellungen(
+    mount_point: MountPoint,
+) -> Result<(), rusqlite::Error> {
+
+    let mut conn = Connection::open(get_db_path(mount_point))?;
+
+    let benutzer = {
+        
+        let mut stmt = conn
+        .prepare("SELECT id, rechte FROM benutzer")?;
+
+        let benutzer = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<usize, usize>(0)?,
+                row.get::<usize, String>(1)?,
+            ))
+        })?
+        .filter_map(|f| f.ok())
+        .collect::<BTreeMap<usize, String>>();
+
+        benutzer
+    };
+
+    let mut tx = conn.transaction()?;
+    
+    {
+        let mut prepared = tx.prepare(
+            "
+                INSERT INTO einstellungen(id,benutzer,einstellung,wert) 
+                SELECT ?1, ?2, ?3, ?4
+                WHERE NOT EXISTS(SELECT 1 FROM einstellungen WHERE benutzer = ?2 AND einstellung = ?3);
+            "
+        )?;
+
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "email.out.smtp.address", ""])?;
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "email.out.smtp.email", ""])?;
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "email.out.smtp.passwort", ""])?;
+
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "download.release.url.windows", "https://github.com/wasmerio/wasmer/releases/download/2.3.0/wasmer-windows.exe"])?;
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "download.release.url.linux", "https://github.com/wasmerio/wasmer/releases/download/2.3.0/wasmer-windows.exe"])?;
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "download.release.url.mac", "https://github.com/wasmerio/wasmer/releases/download/2.3.0/wasmer-windows.exe"])?;
+    }
+
+    tx.commit()?;
+
+    Ok(())
+}
+
+pub fn get_globale_einstellungen(
+    mount_point: MountPoint,
+) -> Result<BTreeMap<String, (String, String)>, String> {
+    get_einstellungen_fuer_benutzer(
+        mount_point,
+        &BenutzerInfo { 
+            id: -1, 
+            rechte: "gast".to_string(), 
+            name: "".to_string(), 
+            email: "".to_string() 
+        },
+    )
+}
+
+pub fn get_einstellungen_fuer_benutzer(
+    mount_point: MountPoint,
+    info: &BenutzerInfo,
+) -> Result<BTreeMap<String, (String, String)>, String> {
+
+    let mut conn = Connection::open(get_db_path(mount_point))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT id, einstellung, wert FROM einstellungen WHERE benutzer = ?1")
+        .map_err(|_| format!("Fehler beim Auslesen der Einstellungen"))?;
+
+    let einstellungen = stmt
+        .query_map(rusqlite::params![info.id], |row| {
+            Ok((
+                row.get::<usize, String>(0)?,
+                row.get::<usize, String>(1)?,
+                row.get::<usize, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    Ok(
+        einstellungen
+        .into_iter()
+        .filter_map(|o| o.ok())
+        .map(|(a, b, c)| (a, (b, c)))
+        .collect()
+    )
 }
 
 pub fn bezirke_einfuegen(
@@ -248,8 +388,6 @@ pub fn bezirke_loeschen(
 
     tx.commit()
     .map_err(|e| format!("Fehler beim Löschen von Bezirken in Datenbank: {e}"))?;
-
-    println!("transaction commit ok (bezirke gelöscht)");
 
     Ok(())
 }
@@ -601,15 +739,69 @@ pub fn create_user(
     Ok(())
 }
 
-pub fn change_user(
+pub fn bearbeite_benutzer_pubkey(
     mount_point: MountPoint,
-    name: Option<&str>,
-    email: Option<&str>,
-    passwort: Option<&str>,
-    rechte: Option<&str>,
-    pubkey: Option<&str>,
+    id: &str,
+    neuer_pubkey: &str,
 ) -> Result<(), String> {
-    println!("change user {name:?}");
+
+    use sequoia_openpgp::parse::{Parse, PacketParser};
+    use sequoia_openpgp::Cert;
+
+    let ppr = PacketParser::from_bytes(neuer_pubkey.as_bytes())
+        .map_err(|e| format!("{e}"))?;
+    
+    let cert = Cert::try_from(ppr)
+        .map_err(|e| format!("{e}"))?;
+
+    let fingerprint = cert.fingerprint().to_string();
+
+    let mut conn = Connection::open(get_db_path(mount_point))
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let ok_update = conn.execute(
+        "UPDATE publickeys SET pubkey = ?2, fingerprint = ?3 WHERE email = ?1", 
+        rusqlite::params![id, neuer_pubkey, fingerprint],
+    ).ok();
+    
+    if ok_update.is_none() || ok_update == Some(0) {
+        conn.execute(
+            "INSERT INTO publickeys (email, pubkey, fingerprint) VALUES (?1, ?2, ?3)", 
+            rusqlite::params![id, neuer_pubkey, fingerprint],
+        )
+        .map_err(|e| format!("Fehler beim Bearbeiten des öffentlichen Schlüssels: {e}"))?;
+    }
+    
+    Ok(())
+}
+
+pub fn bearbeite_benutzer_rechte(
+    mount_point: MountPoint,
+    ids: &[String],
+    neue_rechte: &str,
+) -> Result<(), String> {
+
+    let mut conn = Connection::open(get_db_path(mount_point))
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut tx = conn.transaction()
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    {
+        let mut stmt = tx.prepare("UPDATE benutzer SET rechte = ?2 WHERE email = ?1")
+        .map_err(|e| format!("Fehler beim Bearbeiten der Benutzerrechte"))?;
+    
+        for id in ids {
+            let id = id.clone();
+            let neue_rechte = neue_rechte.to_string();
+            stmt.execute(rusqlite::params![id, neue_rechte])
+            .map_err(|e| format!("Fehler beim Bearbeiten der Benutzerrechte"))?;
+        }
+    }
+
+    tx.commit()
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
     Ok(())
 }
 
@@ -852,21 +1044,30 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
             );
 
             // Benutzer
+            //
+            // https://www.sqlitetutorial.net/sqlite-full-outer-join/
             let mut stmt = conn
                 .prepare(
                     "
-                SELECT 
-                    benutzer.name, 
-                    benutzer.email, 
-                    benutzer.rechte, 
-                    publickeys.pubkey, 
-                    publickeys.fingerprint 
-                FROM benutzer 
-                LEFT JOIN publickeys
-                ON publickeys.email = benutzer.email
+                SELECT  benutzer.name,
+                        benutzer.email,
+                        benutzer.rechte,
+                        publickeys.pubkey,
+                        publickeys.fingerprint
+                FROM benutzer
+                LEFT JOIN publickeys ON publickeys.email = benutzer.email
+                    UNION ALL
+                    SELECT benutzer.name,
+                        benutzer.email,
+                        benutzer.rechte,
+                        publickeys.pubkey,
+                        publickeys.fingerprint
+                    FROM publickeys
+                    LEFT JOIN benutzer ON benutzer.email = publickeys.email
+                    WHERE publickeys.email IS NULL
             ",
                 )
-                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 2"))?;
+                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 2: {e}"))?;
 
             let benutzer = stmt
                 .query_map(rusqlite::params![], |row| {
@@ -1007,28 +1208,29 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 "meine-kontodaten".to_string(),
                 KontoTabelle {
                     spalten: vec![
-                        "name".to_string(),
-                        "email".to_string(),
-                        "rechte".to_string(),
-                        "publickeys.fingerprint".to_string(),
-                        "publickeys.pubkey".to_string(),
+                        "id".to_string(),
+                        "global".to_string(),
+                        "einstellung".to_string(),
+                        "wert".to_string(),
                     ],
-                    daten: benutzer
-                        .into_iter()
-                        .filter_map(|row| {
-                            let row = row.ok()?;
-                            Some((
-                                row.1.clone(),
-                                vec![
-                                    row.0.clone(),
-                                    row.1.clone(),
-                                    row.2.clone(),
-                                    row.3.clone().unwrap_or_default(),
-                                    row.4.clone().unwrap_or_default(),
-                                ],
-                            ))
-                        })
-                        .collect(),
+                    daten: {
+                        let mut d = BTreeMap::new();
+                        for (id, (k, v)) in get_einstellungen_fuer_benutzer(MountPoint::Local, &benutzer_info)?.into_iter() {
+                            d.insert(id.to_string(), vec![
+                                "false".to_string(),
+                                k.to_string(),
+                                v.to_string(),
+                            ]);
+                        }
+                        for (id, (k, v)) in get_globale_einstellungen(MountPoint::Local)?.into_iter() {
+                            d.insert(id.to_string(), vec![
+                                "true".to_string(),
+                                k.to_string(),
+                                v.to_string(),
+                            ]);
+                        }
+                        d
+                    },
                 },
             );
         }
@@ -1124,7 +1326,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
                 SELECT 
                     benutzer.name, 
                     benutzer.email, 
-                    benutzer.rechte, 
+                    benutzer.rechte
                 FROM benutzer 
                 WHERE benutzer.id = ?1
             ",
@@ -1409,6 +1611,11 @@ pub fn create_zugriff(
     .map_err(|e| format!("Fehler beim Einfügen von Zugriff: {e}"))?;
 
     Ok(()) // TODO
+}
+
+pub fn generate_uuid() -> String {
+    let token = uuid::Uuid::new_v4();
+    format!("{token}")
 }
 
 pub fn generate_token() -> (String, DateTime<Utc>) {

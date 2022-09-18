@@ -1,0 +1,11 @@
+{
+    "digitalisiert": false,
+    "land": "Brandenburg",
+        "inhalt": {
+            "titelblatt": {
+            "amtsgericht": "Prenzlau",
+            "grundbuch_von": "Ludwigsburg",
+            "blatt": "456"
+        }
+    }
+}
