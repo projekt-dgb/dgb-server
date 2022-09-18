@@ -45,7 +45,7 @@
 //!
 //! - `abo-loeschen`: Löscht das angegebene Abonnement.
 //!
-use crate::{db::GpgPublicKeyPair, email::SmtpConfig, models::MountPoint};
+use crate::{db::GpgPublicKeyPair, models::MountPoint};
 use actix_web::{web::JsonConfig, App, HttpServer};
 use clap::Parser;
 use models::get_data_dir;
@@ -87,13 +87,6 @@ impl AppState {
     pub fn k8s_aktiv(&self) -> bool {
         self.data.lock().ok().map(|l| l.k8s_aktiv).unwrap_or(false)
     }
-    pub fn smtp_config(&self) -> SmtpConfig {
-        self.data
-            .lock()
-            .ok()
-            .map(|l| l.smtp_config.clone())
-            .unwrap_or_default()
-    }
 }
 
 /// Server-interne Konfiguration, geladen beim Server-Start
@@ -109,8 +102,6 @@ pub struct AppStateData {
     pub k8s_aktiv: bool,
     /// Mount des k8s-PersistenVolume zum Synchronisieren zwischen Servern
     pub remote_mount: String,
-    /// Konfiguration zum automatischen Senden von Benachrichtigungs-E-Mails
-    pub smtp_config: SmtpConfig,
 }
 
 /// Server für .gbx-Dateien, läuft auf 127.0.0.1:8080
@@ -535,7 +526,6 @@ async fn load_app_state() -> AppState {
             sync_server: std::env::var("SYNC_MODE") == Ok("1".to_string()),
             remote_mount: std::env::var("REMOTE_MOUNT").unwrap_or("/mnt/data/files".to_string()),
             k8s_aktiv: crate::k8s::is_running_in_k8s().await,
-            smtp_config: SmtpConfig::default(),
         })),
     }
 }

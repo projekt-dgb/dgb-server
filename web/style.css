@@ -169,10 +169,10 @@ hr {
     max-width: 400px;
 }
 
-#links li {
+.links li {
     display: inline-block;
 }
-#links a {
+.links a {
     margin-right: 10px;
 }
 

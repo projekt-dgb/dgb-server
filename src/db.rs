@@ -4,6 +4,7 @@ use crate::{
     api::{pull::{PullResponse, PullResponseError}, index::ZugriffTyp},
     models::{get_data_dir, get_db_path, AbonnementInfo, BenutzerInfo, PdfFile},
     MountPoint, BezirkNeuArgs,
+    email::SmtpConfig,
 };
 use chrono::{DateTime, Utc};
 use git2::Repository;
@@ -943,6 +944,28 @@ pub struct KontoData {
 pub struct KontoTabelle {
     pub spalten: Vec<String>,
     pub daten: BTreeMap<String, Vec<String>>,
+}
+
+pub fn get_email_config() -> Result<SmtpConfig, String> {
+
+    let global = get_globale_einstellungen(MountPoint::Local)?;
+    let global = global
+        .into_iter()
+        .map(|(_, (k, v))| (k, v))
+        .collect::<BTreeMap<_, _>>();
+
+    let smtp_adresse = global.get("email.out.smtp.address")
+        .ok_or("E-Mail: keine SMTP-Adresse".to_string())?.clone();
+    let email = global.get("email.out.smtp.email")
+        .ok_or("E-Mail: keine SMTP-EMail".to_string())?.clone();
+    let passwort = global.get("email.out.smtp.passwort")
+        .ok_or("E-Mail: keine SMTP-EMail".to_string())?.clone();
+
+    Ok(SmtpConfig {
+        smtp_adresse,
+        email,
+        passwort,
+    })
 }
 
 pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String> {

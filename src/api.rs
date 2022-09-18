@@ -819,7 +819,15 @@ pub mod konto {
                         text: e,
                     })?;
                 
-                // sende_email(&benutzer.email, zugriff_genehmigt)
+                // set password = null on startup, user has to set 
+                // password on first login
+                // create_user_if_not_exists()
+                /*
+                    let smtp_config = crate::db::get_email_config()?;
+                    crate::email::send_zugriff_gewaehrt_email(
+                        &smtp_config
+                    )?;
+                */
             },
             ("admin", "zugriff-ablehnen") => {
                 crate::api::write_to_root_db(DbChangeOp::ZugriffAblehnen {
@@ -1823,9 +1831,10 @@ pub mod upload {
 
             let email_abos = crate::db::get_email_abos(&blatt).map_err(|e| format!("{e}"))?;
 
+            let smtp_config = crate::db::get_email_config()?;
             for abo_info in email_abos {
                 let _ = crate::email::send_change_email(
-                    &app_state.smtp_config(),
+                    &smtp_config,
                     &app_state.host_name(),
                     &abo_info,
                     &commit_id,
