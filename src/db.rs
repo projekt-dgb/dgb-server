@@ -136,7 +136,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
                 email           VARCHAR(255) UNIQUE NOT NULL,
                 name            VARCHAR(255) NOT NULL,
                 rechte          VARCHAR(255) NOT NULL,
-                password_hashed BLOB NOT NULL
+                password_hashed BLOB
         )",
         [],
     )?;
@@ -933,6 +933,13 @@ pub fn get_key_for_fingerprint(
     Ok(cert)
 }
 
+pub enum KontoDataResult {
+    // Benutzerkonto wurde noch nicht aktiviert (neues Konto)
+    KeinPasswort,
+    // Benutzerkonto ist normal aktiviert
+    Aktiviert(KontoData),
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct KontoData {
     pub kontotyp: String,
@@ -968,12 +975,23 @@ pub fn get_email_config() -> Result<SmtpConfig, String> {
     })
 }
 
-pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String> {
+pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, String> {
     let mut data = KontoData::default();
     data.kontotyp = benutzer_info.rechte.clone();
 
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let pw_rows: Option<Vec<u8>> = conn.query_row(
+        "SELECT passwort FROM benutzer WHERE id = ?1", 
+        rusqlite::params![benutzer_info.id],
+        |row| { row.get(0) },
+    )
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    if pw_rows.is_none() {
+        return Ok(KontoDataResult::KeinPasswort);
+    }
 
     match benutzer_info.rechte.as_str() {
         "admin" => {
@@ -1391,7 +1409,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoData, String>
         _ => {}
     }
 
-    Ok(data)
+    Ok(KontoDataResult::Aktiviert(data))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1595,6 +1613,56 @@ pub fn zugriff_genehmigen(
     tx.commit()
     .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
+    // Benutzer erstellen mit passwort = NULL (wird beim ersten Login gesetzt)
+    let mut benutzer_neu = Vec::new();
+    for id in ids.iter() {
+
+        let (name, email, typ): (String, String, String)  = conn.query_row(
+            "SELECT name, email, typ from zugriffe WHERE id = ?1", 
+            rusqlite::params![id], 
+            |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            }
+        ).map_err(|e| format!("{e}"))?;
+        
+        let query_benutzer_count: i32  = conn.query_row(
+            "SELECT COUNT(*) FROM benutzer WHERE email = ?1",
+            rusqlite::params![email],
+            |row| { row.get(0) },
+        ).map_err(|e| format!("{e}"))?;
+
+        if query_benutzer_count == 0 {
+            benutzer_neu.push((name, email, typ));
+        }
+    }
+
+    if benutzer_neu.is_empty() {
+        return Ok(());
+    }
+
+    let tx = conn.transaction()
+    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO benutzer (name, email, rechte, passwort_hashed) VALUES ?1, ?2, ?3, NULL"
+        ).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank: {e}"))?;
+    
+        for (name, email, typ) in benutzer_neu {
+            stmt.execute(rusqlite::params![
+                name,
+                email,
+                match typ.as_str() {
+                    "B-OD" => "bearbeiter",
+                    _ => "gast",
+                },
+            ]).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank: {e}"))?;
+        }    
+    }
+
+    tx.commit()
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
     Ok(())
 }
 
@@ -1673,7 +1741,7 @@ pub fn check_password(
                 row.get::<usize, String>(1)?,
                 row.get::<usize, String>(2)?,
                 row.get::<usize, String>(3)?,
-                row.get::<usize, Vec<u8>>(4)?,
+                row.get::<usize, Option<Vec<u8>>>(4)?,
             ))
         })
         .map_err(|e| Some(format!("Fehler bei Verbindung zur Benutzerdatenbank")))?
@@ -1686,6 +1754,11 @@ pub fn check_password(
                 "Kein Benutzerkonto für angegebene E-Mail-Adresse vorhanden"
             )));
         }
+    };
+
+    let pw = match pw {
+        Some(s) => s,
+        None => return Err(None), // noch kein Passwort gesetzt
     };
 
     if !verify_password(&pw, &passwort) {

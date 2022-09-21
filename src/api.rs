@@ -514,11 +514,12 @@ pub mod konto {
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
 
-    use crate::{db::{KontoData, GpgKeyPair}, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs};
+    use crate::{db::{KontoData, GpgKeyPair, KontoDataResult}, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs};
 
     // Konto-Seite
     #[get("/konto")]
     async fn konto_get(req: HttpRequest) -> impl Responder {
+
         let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(_) => {
@@ -529,9 +530,18 @@ pub mod konto {
         };
 
         let konto_data = match crate::db::get_konto_data(&benutzer) {
-            Ok(b) => b,
+            Ok(KontoDataResult::Aktiviert(a)) => a,
+            Ok(KontoDataResult::KeinPasswort) => {
+                let html = include_str!("../web/konto-login.html")
+                .replace(
+                    "<!-- CSS -->",
+                    &format!("<style>{}</style>", include_str!("../web/style.css")),
+                );
+                return HttpResponse::Ok()
+                    .content_type("text/html; charset=utf-8")
+                    .body(html);
+            },
             Err(e) => {
-                println!("Error: {e}");
                 KontoData::default()
             }
         };
@@ -656,7 +666,6 @@ pub mod konto {
     async fn konto_post_inner(app_state: &AppState, data: &KontoJsonPost) -> Result<KontoData, KontoJsonPostResponseError> {
 
         use crate::api::commit::DbChangeOp;
-        use crate::BenutzerAendernArgs;
         use crate::BezirkNeuArgs;
 
         let benutzer = crate::db::get_user_from_token(&data.auth)
@@ -818,10 +827,7 @@ pub mod konto {
                         code: 500,
                         text: e,
                     })?;
-                
-                // set password = null on startup, user has to set 
-                // password on first login
-                // create_user_if_not_exists()
+
                 /*
                     let smtp_config = crate::db::get_email_config()?;
                     crate::email::send_zugriff_gewaehrt_email(
@@ -864,8 +870,14 @@ pub mod konto {
             }
         }
 
-        let konto_data = crate::db::get_konto_data(&benutzer)
-        .unwrap_or_default();
+        let konto_data = 
+            crate::db::get_konto_data(&benutzer)
+            .unwrap_or(KontoDataResult::KeinPasswort);
+
+        let konto_data = match konto_data {
+            KontoDataResult::Aktiviert(a) => a,
+            KontoDataResult::KeinPasswort => KontoData::default(),
+        };
 
         Ok(konto_data)
     }
@@ -1831,10 +1843,8 @@ pub mod upload {
 
             let email_abos = crate::db::get_email_abos(&blatt).map_err(|e| format!("{e}"))?;
 
-            let smtp_config = crate::db::get_email_config()?;
             for abo_info in email_abos {
                 let _ = crate::email::send_change_email(
-                    &smtp_config,
                     &app_state.host_name(),
                     &abo_info,
                     &commit_id,

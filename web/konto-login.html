@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>dgb - Digitales Grundbuch</title>
+        <!-- CSS -->
+    </head>
+    <body>
+        <nav>
+            <ul>
+                <li>
+                    <a href="/" class="block-btn"><span>Startseite</span></a>
+                    <a href="/api" class="block-btn"><span>API</span></a>
+                </li>
+            </ul>
+        </nav>
+        <h1>Passwort eingeben</h1>
+        <div id="main-container-flex-row">
+            
+            <p>Es scheint, als ob Sie sich zum ersten Mal anmelden.</p>
+            <p>Bitte geben Sie ein Passwort für Ihr Konto ein:</p>
+            
+            <form id="formdata" onsubmit="onPasswortSubmit(event)" method="post">
+                <input type="password" placeholder="Passwort eingeben..."></input>
+                <button type="submit">Konto erstellen</button>
+            </form>
+        </div>
+    </body>
+</html>

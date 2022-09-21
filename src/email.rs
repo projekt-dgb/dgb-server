@@ -29,15 +29,74 @@ pub struct AboWebhookInfo {
     pub aenderungs_id: String,
 }
 
-pub fn send_change_email(
-    config: &SmtpConfig,
-    server_url: &str,
-    abo: &AbonnementInfo,
-    commit_id: &str,
+pub fn send_email(
+    from: &str,
+    to: &str,
+    subject: &str,
+    html: &str,
+    plaintext: &str,
 ) -> Result<(), String> {
     use lettre::transport::smtp::authentication::Credentials;
     use lettre::transport::smtp::authentication::Mechanism;
     use lettre::transport::smtp::PoolConfig;
+
+    let email = Message::builder()
+        .from(from.parse().map_err(|e| format!("Ungültige Sender-E-Mail: {e}"))?)
+        .to(to
+            .parse()
+            .map_err(|e| format!("Ungültige Empfänger-E-Mail: {e}"))?)
+        .subject(subject)
+        .multipart(
+            MultiPart::alternative() // This is composed of two parts.
+                .singlepart(
+                    SinglePart::builder()
+                        .header(header::ContentType::TEXT_PLAIN)
+                        .body(plaintext.to_string()),
+                )
+                .singlepart(
+                    SinglePart::builder()
+                        .header(header::ContentType::TEXT_HTML)
+                        .body(html.to_string()),
+                ),
+        )
+        .map_err(|_| format!("Ungültige E-Mail"))?;
+
+    let smtp_config = crate::db::get_email_config()?;
+
+    let mailer = SmtpTransport::starttls_relay(&smtp_config.smtp_adresse)
+        .map_err(|e| format!("{e}"))?
+        .credentials(Credentials::new(
+            smtp_config.email.clone(),
+            smtp_config.passwort.clone(),
+        ))
+        .authentication(vec![Mechanism::Plain])
+        .pool_config(PoolConfig::new().max_size(20))
+        .build();
+
+    mailer
+        .send(&email)
+        .map_err(|e| format!("failed to deliver message: {e}"))?;
+    
+    Ok(())
+}
+
+pub fn send_zugriff_gewaehrt_email(
+    to: &str,
+) -> Result<(), String> {
+    Ok(())
+}
+
+pub fn send_zugriff_abgelehnt_email(
+    to: &str,
+) -> Result<(), String> {
+    Ok(())
+}
+
+pub fn send_change_email(
+    server_url: &str,
+    abo: &AbonnementInfo,
+    commit_id: &str,
+) -> Result<(), String> {
 
     let AbonnementInfo {
         amtsgericht,
@@ -110,47 +169,16 @@ Um das Abonnement zu kündigen, klicken Sie bitte hier:
 
     let amtsgericht_url_lower = amtsgericht_url.to_lowercase();
 
-    let email = Message::builder()
-        .from(
-            format!("Amtsgericht {amtsgericht} <ag-{amtsgericht_url_lower}@grundbuchaenderung.de>")
-                .parse()
-                .map_err(|e| format!("Ungültige Sender-E-Mail: {e}"))?,
-        )
-        .to(email
-            .parse()
-            .map_err(|e| format!("Ungültige Empfänger-E-Mail: {e}"))?)
-        .subject(&format!(
-            "Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})"
-        ))
-        .multipart(
-            MultiPart::alternative() // This is composed of two parts.
-                .singlepart(
-                    SinglePart::builder()
-                        .header(header::ContentType::TEXT_PLAIN)
-                        .body(plaintext),
-                )
-                .singlepart(
-                    SinglePart::builder()
-                        .header(header::ContentType::TEXT_HTML)
-                        .body(String::from(html)),
-                ),
-        )
-        .map_err(|e| format!("failed to build email"))?;
+    let from = format!("Amtsgericht {amtsgericht} <ag-{amtsgericht_url_lower}@grundbuchaenderung.de>");
+    let to = email;
 
-    let mailer = SmtpTransport::starttls_relay(&config.smtp_adresse)
-        .map_err(|e| format!("{e}"))?
-        .credentials(Credentials::new(
-            config.email.clone(),
-            config.passwort.clone(),
-        ))
-        .authentication(vec![Mechanism::Plain])
-        .pool_config(PoolConfig::new().max_size(20))
-        .build();
-
-    // Store the message when you're ready.
-    mailer
-        .send(&email)
-        .map_err(|e| format!("failed to deliver message: {e}"))?;
+    send_email(
+        &from,
+        to,
+        &format!("Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})"),
+        &html,
+        &plaintext,
+    )?;
 
     Ok(())
 }
