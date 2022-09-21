@@ -196,22 +196,6 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
-
-pub fn edit_benutzer_einstellungen(
-    mount_point: MountPoint,
-    benutzer: &BenutzerInfo,
-    key: &str,
-    value: &str,
-) -> Result<(), String> {
-
-    let mut conn = Connection::open(get_db_path(mount_point))
-    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
-
-
-
-    Ok(())
-}
-
 pub fn bearbeite_einstellung(
     mount_point: MountPoint,
     einstellung_id: &str, 
@@ -983,7 +967,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     let pw_rows: Option<Vec<u8>> = conn.query_row(
-        "SELECT passwort FROM benutzer WHERE id = ?1", 
+        "SELECT password_hashed FROM benutzer WHERE id = ?1", 
         rusqlite::params![benutzer_info.id],
         |row| { row.get(0) },
     )
@@ -992,7 +976,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
     if pw_rows.is_none() {
         return Ok(KontoDataResult::KeinPasswort);
     }
-
+    
     match benutzer_info.rechte.as_str() {
         "admin" => {
             // Zugriffe
@@ -1618,7 +1602,7 @@ pub fn zugriff_genehmigen(
     for id in ids.iter() {
 
         let (name, email, typ): (String, String, String)  = conn.query_row(
-            "SELECT name, email, typ from zugriffe WHERE id = ?1", 
+            "SELECT name, email, typ FROM zugriffe WHERE id = ?1", 
             rusqlite::params![id], 
             |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -1643,17 +1627,15 @@ pub fn zugriff_genehmigen(
     let tx = conn.transaction()
     .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    {
-        let mut stmt = tx.prepare(
-            "INSERT INTO benutzer (name, email, rechte, passwort_hashed) VALUES ?1, ?2, ?3, NULL"
-        ).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank: {e}"))?;
-    
+    if let Ok(mut stmt) = tx.prepare(
+        "INSERT INTO benutzer (name, email, rechte, password_hashed) VALUES (?1, ?2, ?3, NULL)"
+    ) {
         for (name, email, typ) in benutzer_neu {
             stmt.execute(rusqlite::params![
                 name,
                 email,
                 match typ.as_str() {
-                    "B-OD" => "bearbeiter",
+                    "bearbeiter" => "bearbeiter",
                     _ => "gast",
                 },
             ]).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank: {e}"))?;
