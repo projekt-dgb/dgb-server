@@ -75,9 +75,9 @@ ul li {
     list-style-type: none;
 }
 
-@media screen and (max-width: 600px) {
+@media screen and (max-width: 900px) {
     body {
-        font-size: 14px;
+        font-size: 1.2em;
         margin: 0;
         padding: 10px;
     }
@@ -90,6 +90,11 @@ nav {
 
 nav ul {
     float: right;
+    display: flex;
+}
+
+nav ul li:not(:last-child) {
+    margin-right: 10px;
 }
 
 input {
@@ -106,6 +111,7 @@ button.block-btn, a.block-btn {
     font-family: monospace;
     text-decoration: none;
     color: #333;
+    background: white;
     border: 2px solid #ff003b;
     text-align: center;
     position: relative;
@@ -205,17 +211,10 @@ button {
     padding: 0px 5px;
     margin: 7px 10px;
 }
-#main-table-actions > div {
-
-}
 
 #main-table-actions > div input[type="checkbox"] {
     margin-left: 7px;
     transform: translate(0px, 2px);
-}
-
-#main-table-actions > div button {
-    
 }
 
 #main-table-header > div {
@@ -236,10 +235,6 @@ button {
 #main-table-data {
     display: flex;
     overflow-y: scroll;
-}
-
-#main-table-data > div div {
-
 }
 
 #main {
@@ -297,4 +292,152 @@ button {
     flex-grow: 1;
     min-width: 50px;
     line-height: 2;
+}
+
+.splash-img {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 800px;
+    max-width: 800px;
+    position: fixed;
+    opacity: 0.2;
+    z-index: -1;
+    top: 250px;
+    right: -100px;
+    transform: scale(1.5);
+}
+
+@media only screen and (max-width: 600px) {
+    .splash-img {
+        display: none;
+    }
+}
+
+.splash-img .display {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 480px;
+  height: 300px;
+  border: 2px solid #464752;
+  border-radius: 1rem;
+  background: #181818;
+  -webkit-filter: drop-shadow(0px 0px 10px #fcfcfcb7);
+  filter: drop-shadow(0px 0px 10px #ffffffb7);
+  animation: shine1 50s infinite, shine2 17s infinite;
+}
+.splash-img .screen-wrapper {
+    background: white;
+}
+
+.splash-img .screen {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  width: 95%;
+  height: 88%;
+  background-image: url("https://raw.githubusercontent.com/projekt-dgb/dgb/master/doc/dgb.png");
+  background-size: cover;
+  background-position: top;
+  bottom: 20px;
+  left: 2.5%;
+}
+.splash-img .menubar {
+  width: 100%;
+  height: 10px;
+  background: #ffffff59;
+}
+.splash-img .keys {
+  position: relative;
+  width: 480px;
+  top: -8px;
+  height: 0;
+  border-left: 95px solid transparent;
+  border-right: 95px solid transparent;
+  border-bottom: 30px solid #4e4e4e;
+  display: flex;
+  justify-content: center;
+}
+.splash-img .board {
+  position: relative;
+  width: 450px;
+  height: 0;
+  top: 2px;
+  border-left: 35px solid transparent;
+  border-right: 35px solid transparent;
+  border-bottom: 15px solid #141414ce;
+}
+.splash-img .touchpad {
+  position: absolute;
+  width: 160px;
+  height: 0;
+  top: 20px;
+  border-radius: 20px;
+  border-left: 15px solid transparent;
+  border-right: 15px solid transparent;
+  border-bottom: 8px solid #3f3f3f96;
+}
+
+.splash-img .comp {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  top: -8px;
+  width: 670px;
+  height: 12px;
+  background: #393a42;
+  -webkit-filter: drop-shadow(-10px 40px 30px #dfdfdfb7);
+  filter: drop-shadow(-10px 40px 30px #dfdfdfb7);
+  animation: shine1 20s infinite;
+}
+.splash-img .notch {
+  position: relative;
+  width: 120px;
+  height: 10px;
+  background: #4e4f58;
+  border-radius: 0 0 20px 20px;
+}
+.splash-img .compBottom {
+  position: relative;
+  top: -9px;
+  width: 670px;
+  height: 3px;
+  background: #35353d;
+  border-radius: 0 0 50% 50%;
+}
+
+@keyframes shine1 {
+  0% {
+    -webkit-filter: drop-shadow(-10px 40px 30px #ffffffb7);
+    filter: drop-shadow(-10px 40px 30px #dfdfdfb7);
+  }
+
+  50% {
+    -webkit-filter: drop-shadow(0px -10px 40px #434343);
+    filter: drop-shadow(0px -10px 40px #434343);
+  }
+
+  100% {
+    -webkit-filter: drop-shadow(-10px 40px 30px #dfdfdfb7);
+    filter: drop-shadow(-10px 40px 30px #dfdfdfb7);
+  }
+}
+
+@keyframes shine2 {
+  0% {
+    -webkit-filter: drop-shadow(0px 0px 10px #fcfcfcb7);
+    filter: drop-shadow(0px 0px 10px #ffffffb7);
+  }
+
+  50% {
+    -webkit-filter: drop-shadow(0px -10px 40px #ff9595);
+    filter: drop-shadow(0px -10px 40px #ff9595);
+  }
+
+  100% {
+    -webkit-filter: drop-shadow(0px 0px 10px #fcfcfcb7);
+    filter: drop-shadow(0px 0px 10px #ffffffb7);
+  }
 }
