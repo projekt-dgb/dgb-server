@@ -249,6 +249,7 @@ pub fn seed_benutzer_einstellungen(
             "
         )?;
 
+        prepared.execute(rusqlite::params![generate_uuid(), -1, "server.config.url", "http://127.0.0.1:8080"])?;
         prepared.execute(rusqlite::params![generate_uuid(), -1, "email.out.smtp.address", ""])?;
         prepared.execute(rusqlite::params![generate_uuid(), -1, "email.out.smtp.email", ""])?;
         prepared.execute(rusqlite::params![generate_uuid(), -1, "email.out.smtp.passwort", ""])?;
@@ -935,6 +936,20 @@ pub struct KontoData {
 pub struct KontoTabelle {
     pub spalten: Vec<String>,
     pub daten: BTreeMap<String, Vec<String>>,
+}
+
+pub fn get_server_address(
+    mount_point: MountPoint,
+) -> Result<String, String> {
+
+    let conn = Connection::open(get_db_path(mount_point))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    conn.query_row(
+        "SELECT wert FROM einstellungen WHERE benutzer = -1 AND einstellung = 'server.config.url'", 
+        rusqlite::params![],
+        |r| r.get(0),
+    ).map_err(|_| format!("Fehler beim Auslesen der Einstellungen"))
 }
 
 pub fn get_email_config() -> Result<SmtpConfig, String> {

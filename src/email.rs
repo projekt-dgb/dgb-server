@@ -1,4 +1,4 @@
-use crate::models::AbonnementInfo;
+use crate::models::{MountPoint, AbonnementInfo};
 use lettre::{
     message::{header, MultiPart, SinglePart},
     Message, SmtpTransport, Transport,
@@ -82,18 +82,101 @@ pub fn send_email(
 
 pub fn send_zugriff_gewaehrt_email(
     to: &str,
+    zugriff_id: &str,
+    grundbuecher: &[(String, String, String)] // (Amtsgericht, Blatt, Nr.)
 ) -> Result<(), String> {
+
+    let server_url = crate::db::get_server_address(MountPoint::Local)?;
+
+    let mut gb_short = grundbuecher.first()
+        .map(|(a, g, b)| format!("{g} Blatt {b}"))
+        .ok_or(format!("Kein Grundbuch für Zugriff"))?;
+
+    if grundbuecher.len() > 1 {
+        gb_short.push_str(" u.a.");
+    }
+
+    let gb_list_plain = grundbuecher.iter()
+    .map(|(a, g, b)| format!("Amtsgericht {a}, Grundbuch von {g} Blatt {b}"))
+    .collect::<Vec<_>>()
+    .join("\r\n");
+
+    let gb_list = grundbuecher.iter()
+    .map(|(a, g, b)| format!("<li>Amtsgericht {a}, Grundbuch von {g} Blatt {b}</li>"))
+    .collect::<Vec<_>>()
+    .join("\r\n");
+
+    let html = format!("<!DOCTYPE html>
+    <html lang=\"de\">
+    <head>
+        <meta charset=\"UTF-8\">
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+        <title>Ihr Zugriff auf Grundbuch {gb_short} wurde gewährt</title>
+    </head>
+    <body>
+        <div style=\"width: 800px; margin: 0 auto;\">
+          
+            <h4>Ihr Zugriff auf Grundbuch {gb_short} wurde gewährt</h4>
+            
+            <p>Guten Tag,</p>
+            
+            <p>Ihr Zugriff auf die folgenden Grundbücher wurde gewährt</p>
+            
+            <ul>
+                {gb_list}
+            </ul>
+            
+            <p>Um ihre Grundbücher einzusehen, melden Sie sich bitte in Ihrem Konto mit dem folgenden Link an:</p>
+            <a href=\"{server_url}/konto?id={zugriff_id}\">{server_url}/konto?id={zugriff_id}</a>
+            <br/>
+            
+            <br/>
+
+            <p>Sie wurden benachrichtigt, da Sie Benachrichtigungen für Zugriffe abonniert haben.</p>
+            <p>Die Einstellung für Benachrichtigungen können Sie in Ihrem Konto über \"Einstellungen\" anpassen.</p>
+        </div>
+    </body>
+    </html>");
+
+    let plaintext = format!("Guten Tag,
+
+Ihr Zugriff auf die folgenden Grundbücher wurde gewährt
+
+{gb_list_plain}
+
+Um ihre Grundbücher einzusehen, melden Sie sich bitte in Ihrem Konto mit dem folgenden Link an:
+
+Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgenden Link:
+{server_url}/konto?id={zugriff_id}
+
+Sie wurden benachrichtigt, da Sie Benachrichtigungen für Zugriffe abonniert haben.
+Die Einstellung für Benachrichtigungen können Sie in Ihrem Konto über \"Einstellungen\" anpassen.");
+
+    let url = reqwest::Url::parse(&server_url)
+        .map_err(|e| format!("{e}"))?;
+    
+    let host = url.host_str().unwrap_or("");
+    
+    send_email(
+        &format!("Grundbuch <noreply@{host}>"), 
+        to, 
+        &format!("Ihr Zugriff auf Grundbuch {gb_short} wurde gewährt"), 
+        &html, 
+        &plaintext,
+    )?;
+
     Ok(())
 }
 
 pub fn send_zugriff_abgelehnt_email(
     to: &str,
 ) -> Result<(), String> {
+    let server_url = crate::db::get_server_address(MountPoint::Local)?;
+
     Ok(())
 }
 
 pub fn send_change_email(
-    server_url: &str,
     abo: &AbonnementInfo,
     commit_id: &str,
 ) -> Result<(), String> {
@@ -112,9 +195,10 @@ pub fn send_change_email(
     let amtsgericht_url = urlencoding::encode(amtsgericht);
     let grundbuchbezirk_url = urlencoding::encode(grundbuchbezirk);
     let aktenzeichen_url = urlencoding::encode(&aktenzeichen);
+    let server_url = crate::db::get_server_address(MountPoint::Local)?;
 
     let html = format!("<!DOCTYPE html>
-    <html lang=\"de\">SmtpClient
+    <html lang=\"de\">
     <head>
         <meta charset=\"UTF-8\">
         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
@@ -146,7 +230,7 @@ pub fn send_change_email(
             <p>Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.</p>
             <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}\">hier</a>.</p>
         </div>
-    </body>send_change_email
+    </body>
     </html>");
 
     let plaintext = format!("Guten Tag,
@@ -184,10 +268,12 @@ Um das Abonnement zu kündigen, klicken Sie bitte hier:
 }
 
 pub async fn send_change_webhook(
-    server_url: &str,
     abo: &AbonnementInfo,
     commit_id: &str,
 ) -> Result<(), String> {
+
+    let server_url = crate::db::get_server_address(MountPoint::Local)?;
+
     let abo_info = AboWebhookInfo {
         server_url: server_url.to_string(),
         amtsgericht: abo.amtsgericht.clone(),

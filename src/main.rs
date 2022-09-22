@@ -70,13 +70,6 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn host_name(&self) -> String {
-        self.data
-            .lock()
-            .ok()
-            .map(|l| l.host_name.clone())
-            .unwrap_or_default()
-    }
     pub fn sync_server(&self) -> bool {
         self.data
             .lock()
@@ -92,9 +85,6 @@ impl AppState {
 /// Server-interne Konfiguration, geladen beim Server-Start
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppStateData {
-    /// Name des Servers ohne "https://", notwendig für E-Mails,
-    /// z.B. "grundbuch-test.eu"
-    pub host_name: String,
     /// Ob dieser Server im Sync-Modus läuft (und daher
     /// Schreibrechte auf /mnt/data/files hat) oder nur Lesezugriff
     pub sync_server: bool,
@@ -522,7 +512,6 @@ async fn init(app_state: &AppState) -> Result<(), String> {
 async fn load_app_state() -> AppState {
     AppState {
         data: Arc::new(Mutex::new(AppStateData {
-            host_name: std::env::var("HOST_NAME").unwrap_or("127.0.0.1".to_string()),
             sync_server: std::env::var("SYNC_MODE") == Ok("1".to_string()),
             remote_mount: std::env::var("REMOTE_MOUNT").unwrap_or("/mnt/data/files".to_string()),
             k8s_aktiv: crate::k8s::is_running_in_k8s().await,

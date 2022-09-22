@@ -515,56 +515,74 @@ pub mod konto {
     use serde_derive::{Deserialize, Serialize};
 
     use crate::{db::{KontoData, GpgKeyPair, KontoDataResult}, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs};
+    
+    #[derive(Deserialize)]
+    struct ZugriffId {
+        id: Option<String>,
+    }
 
     // Konto-Seite
     #[get("/konto")]
-    async fn konto_get(req: HttpRequest) -> impl Responder {
+    async fn konto_get(req: HttpRequest, zugriff: web::Query<ZugriffId>) -> impl Responder {
+        match zugriff.id.as_ref() {
+            Some(s) => {
+                /*
+                let benutzer = match super::get_benutzer_from_httpauth(&req).await {
+                    Ok(o) => o,
+                    Err(_) => {
+                        return HttpResponse::Found()
+                            .append_header(("Location", "/login"))
+                            .finish();
+                    }
+                }; 
+                */
 
-        let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
-            Ok(o) => o,
-            Err(_) => {
-                return HttpResponse::Found()
-                    .append_header(("Location", "/login"))
-                    .finish();
-            }
-        };
-
-        let konto_data = match crate::db::get_konto_data(&benutzer) {
-            Ok(KontoDataResult::Aktiviert(a)) => a,
-            Ok(KontoDataResult::KeinPasswort) => {
                 let html = include_str!("../web/konto-login.html")
                 .replace(
                     "<!-- CSS -->",
                     &format!("<style>{}</style>", include_str!("../web/style.css")),
                 );
-                return HttpResponse::Ok()
-                    .content_type("text/html; charset=utf-8")
-                    .body(html);
+
+                HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html)
             },
-            Err(e) => {
-                KontoData::default()
+            None => {
+                let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
+                    Ok(o) => o,
+                    Err(_) => {
+                        return HttpResponse::Found()
+                            .append_header(("Location", "/login"))
+                            .finish();
+                    }
+                };
+
+                let konto_data = match crate::db::get_konto_data(&benutzer) {
+                    Ok(KontoDataResult::Aktiviert(a)) => a,
+                    _ => KontoData::default(),
+                };
+
+                let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
+
+                let html = include_str!("../web/konto.html")
+                    .replace(
+                        "<!-- CSS -->",
+                        &format!("<style>{}</style>", include_str!("../web/style.css")),
+                    )
+                    .replace(
+                        "data-konto-daten=\"{}\"",
+                        &format!("data-konto-daten=\'{}\'", konto_data_json),
+                    )
+                    .replace(
+                        "data-token-id=\"\"",
+                        &format!("data-token-id=\"{}\"", token),
+                    );
+
+                HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(html)
             }
-        };
-
-        let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
-
-        let html = include_str!("../web/konto.html")
-            .replace(
-                "<!-- CSS -->",
-                &format!("<style>{}</style>", include_str!("../web/style.css")),
-            )
-            .replace(
-                "data-konto-daten=\"{}\"",
-                &format!("data-konto-daten=\'{}\'", konto_data_json),
-            )
-            .replace(
-                "data-token-id=\"\"",
-                &format!("data-token-id=\"{}\"", token),
-            );
-
-        HttpResponse::Ok()
-            .content_type("text/html; charset=utf-8")
-            .body(html)
+        }
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -828,12 +846,13 @@ pub mod konto {
                         text: e,
                     })?;
 
-                /*
-                    let smtp_config = crate::db::get_email_config()?;
+                    /* 
                     crate::email::send_zugriff_gewaehrt_email(
-                        &smtp_config
+                        to: &str,
+                        zugriff_id: &str,
+                        grundbuecher: &[(String, String, String)]
                     )?;
-                */
+                    */
             },
             ("admin", "zugriff-ablehnen") => {
                 crate::api::write_to_root_db(DbChangeOp::ZugriffAblehnen {
@@ -1834,7 +1853,6 @@ pub mod upload {
 
             for abo_info in webhook_abos {
                 let _ = crate::email::send_change_webhook(
-                    &app_state.host_name(),
                     &abo_info,
                     &commit_id,
                 )
@@ -1845,7 +1863,6 @@ pub mod upload {
 
             for abo_info in email_abos {
                 let _ = crate::email::send_change_email(
-                    &app_state.host_name(),
                     &abo_info,
                     &commit_id,
                 );
