@@ -59,6 +59,8 @@ pub fn get_index_dir() -> String {
 /// Entspricht einem PDF-Grundbuch
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PdfFile {
+    #[serde(default)]
+    pub digitalisiert: bool,
     // Pfad der zugehörigen .pdf-Datei
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,8 +104,8 @@ pub struct PdfFile {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub nebenbeteiligte_dateipfade: Vec<String>,
-
     /// Analysiertes Grundbuch
+    #[serde(alias = "inhalt")]
     pub analysiert: Grundbuch,
 }
 
@@ -115,7 +117,23 @@ pub struct Titelblatt {
     /// Grundbuch von X
     pub grundbuch_von: String,
     /// Blatt X
-    pub blatt: usize,
+    pub blatt: StringOrUsize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StringOrUsize {
+    S(String),
+    U(usize),
+}
+
+impl std::fmt::Display for StringOrUsize {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            StringOrUsize::S(s) => write!(f, "{s}"),
+            StringOrUsize::U(s) => write!(f, "{s}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

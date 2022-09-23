@@ -109,7 +109,7 @@
 
 
 
-                html.push("<select id=\"zugriff_blatt-grundbuchbezirk-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"bezirkAendern(event)\">");
+                html.push("<select id=\"zugriff_blatt-grundbuchbezirk-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"grundbuchBezirkAendern(event)\">");
                 
                 var ag_selected = "";
                 if (element.bezirk == "ALLE_GRUNDBUCHBEZIRKE") { ag_selected = "selected "; }
@@ -122,7 +122,7 @@
 
 
 
-                html.push("<select id=\"zugriff_blatt-grundbuchblatt-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"blattAendern(event)\">");
+                html.push("<select id=\"zugriff_blatt-grundbuchblatt-" + i + "\" data-blatt-id=\"" + i + "\" onchange=\"grundbuchBlattAendern(event)\">");
                 
                 var ag_selected = "";
                 if (element.blatt == "ALLE_BLAETTER") { ag_selected = "selected "; }
@@ -171,7 +171,10 @@
         function updateBezirke(id, object) {
             if (object.status !== "ok") { return; }
             if (object.action !== "get-bezirke") { return; }
-            blaetter[id].bezirke_verfuegbar = object.data.bezirke;
+            console.log(id);
+            console.log(object);
+            blaetter[id].grundbuchbezirke_verfuegbar = object.data.bezirke;
+            console.log(blaetter[id].grundbuchbezirke_verfuegbar);
             rerenderBlaetter();
         }
 
@@ -179,7 +182,8 @@
             var newBezirk = event.target.value;
             var id = parseInt(event.target.dataset.blattId);
             blaetter[id].grundbuchbezirk = newBezirk;
-            submitRequest("get-blaetter", id, { land: blaetter[id].bundesland, amtsgericht: blaetter[id].amtsgericht, bezirk: newBezirk }, updateBlaetter);
+            var object = { land: blaetter[id].bundesland, amtsgericht: blaetter[id].amtsgericht, bezirk: newBezirk };
+            submitRequest("get-blaetter", id, object, updateBlaetter);
         }
 
         function updateBlaetter(id, object) {

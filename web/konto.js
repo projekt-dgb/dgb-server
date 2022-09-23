@@ -597,8 +597,6 @@ function renderRows(id) {
                 cell_text.textContent = "Schlüsselpaar generieren";
                 cell_text.onclick = function() { generiereSchluesselPaar(this); }
             } else {
-                console.log(pubkey_fingerprint);
-                console.log(pubkey_fingerprint.substr(0, 6));
                 cell_text.textContent = "Schlüssel " + pubkey_fingerprint.substr(0, 6) + "";
             }
             cell_node.appendChild(cell_text);
@@ -832,12 +830,12 @@ function renderActions(id) {
         bezirk_new.htmlFor = "bezirke-von-csv-laden";
         bezirk_new.textContent = "Bezirke von CSV laden";
         bezirk_new.classList.add("custom-file-upload");
-        bezirk_new.onchange = function() { bezirkNeuVonCsv(this); }
         actions_data.appendChild(bezirk_new);
 
         var bezirk_new = document.createElement("input");
         bezirk_new.type = "file";
         bezirk_new.id = "bezirke-von-csv-laden";
+        bezirk_new.onchange = function() { bezirkNeuVonCsv(this); }
         actions_data.appendChild(bezirk_new);
 
         var loeschen = document.createElement("button");

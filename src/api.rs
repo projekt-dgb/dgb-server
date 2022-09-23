@@ -288,6 +288,7 @@ pub mod index {
                 ))
             }
             GetBlaetter(gb) => {
+                println!("get blaetter: {:#?}", gb);
                 let blaetter =
                     crate::db::get_blaetter_for_bezirk(&gb.land, &gb.amtsgericht, &gb.bezirk)?;
                 Ok(ZugriffJsonResponseOk::GetBlaetter(
@@ -1656,7 +1657,7 @@ pub mod upload {
             let grundbuch = &neu.analysiert.titelblatt.grundbuch_von;
             let land = get_land(&gemarkungen, &amtsgericht, &grundbuch)?;
 
-            let blatt = neu.analysiert.titelblatt.blatt;
+            let blatt = neu.analysiert.titelblatt.blatt.clone();
             let target_path = folder_path
                 .clone()
                 .join(land.clone())
@@ -1680,7 +1681,7 @@ pub mod upload {
             let grundbuch = &geaendert.neu.analysiert.titelblatt.grundbuch_von;
             let land = get_land(&gemarkungen, &amtsgericht, &grundbuch)?;
 
-            let blatt = geaendert.neu.analysiert.titelblatt.blatt;
+            let blatt = geaendert.neu.analysiert.titelblatt.blatt.clone();
             let target_path = folder_path
                 .clone()
                 .join(land.clone())
@@ -2086,7 +2087,7 @@ pub mod download {
         use printpdf::PdfDocument;
 
         let grundbuch_von = gb.titelblatt.grundbuch_von.clone();
-        let blatt = gb.titelblatt.blatt;
+        let blatt = gb.titelblatt.blatt.clone();
         let amtsgericht = gb.titelblatt.amtsgericht.clone();
 
         let titel = format!("{grundbuch_von} Blatt {blatt} (Amtsgericht {amtsgericht})");
@@ -2194,10 +2195,12 @@ pub mod suche {
             .grundbuecher
             .into_iter()
             .filter_map(|ergebnis| {
+                use crate::models::StringOrUsize;
+
                 let titelblatt = Titelblatt {
                     amtsgericht: ergebnis.amtsgericht.clone(),
                     grundbuch_von: ergebnis.grundbuch_von.clone(),
-                    blatt: ergebnis.blatt.parse().ok()?,
+                    blatt: StringOrUsize::S(ergebnis.blatt.clone()),
                 };
 
                 let abos = abos

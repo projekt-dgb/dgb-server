@@ -566,6 +566,8 @@ pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, 
         other => Bundesland::from_code(other).ok_or(format!("Ungültige Bundesland-ID"))?,
     };
 
+    println!("get bezirke for bundesland_clean: {bundesland_clean:?}");
+
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -573,19 +575,25 @@ pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, 
         .prepare("SELECT amtsgericht FROM bezirke where land = ?1")
         .map_err(|_| format!("Fehler beim Auslesen der Bezirke"))?;
 
-    let bezirke = stmt
+    let amtsgerichte = stmt
         .query_map([bundesland_clean.into_code()], |row| {
             Ok((row.get::<usize, String>(0)?,))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    Ok(bezirke
+    let mut amtsgerichte = amtsgerichte
         .into_iter()
         .filter_map(|b| Some(b.ok()?.0))
-        .collect())
+        .collect::<Vec<_>>();
+
+    amtsgerichte.sort();
+    amtsgerichte.dedup();
+    
+    Ok(amtsgerichte)
 }
 
 pub fn get_bezirke_for_amtsgericht(amtsgericht: &str) -> Result<Vec<String>, String> {
+    println!("get bezirke for amtsgericht: {amtsgericht}");
     let amtsgericht_clean = match amtsgericht {
         "ALLE_AMTSGERICHTE" => {
             return {
@@ -611,10 +619,15 @@ pub fn get_bezirke_for_amtsgericht(amtsgericht: &str) -> Result<Vec<String>, Str
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    Ok(bezirke
-        .into_iter()
-        .filter_map(|b| Some(b.ok()?.0))
-        .collect())
+    let mut bezirke = bezirke
+    .into_iter()
+    .filter_map(|b| Some(b.ok()?.0))
+    .collect::<Vec<_>>();
+
+    bezirke.sort();
+    bezirke.dedup();
+    
+    Ok(bezirke)
 }
 
 pub fn get_blaetter_for_bezirk(
@@ -632,22 +645,30 @@ pub fn get_blaetter_for_bezirk(
             }
         },
     };
+    println!("get blaetter for bezirk: {:?}", (land, amtsgericht, bezirk));
     let folder = Path::new(&get_data_dir(MountPoint::Local))
         .join(land.into_str())
         .join(amtsgericht)
         .join(bezirk);
+    
     if !folder.exists() || !folder.is_dir() {
         return Ok(Vec::new());
     }
+
+    println!("lese ordner {:?}", folder.display());
 
     let paths = std::fs::read_dir(folder).map_err(|e| format!("{e}"))?;
     let mut blaetter = Vec::new();
     for path in paths {
         let path = path.map_err(|e| format!("{e}"))?.path();
-        let file = std::fs::read_to_string(path)
-            .map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;
+        println!("    lese {:?}", path.display());
+        let file = match std::fs::read_to_string(path) {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+        println!("    ok");
         let parsed: PdfFile = serde_json::from_str(&file)
-            .map_err(|e| format!("Konnte Bezirk {bezirk:?} nicht lesen"))?;
+            .map_err(|e| format!("Konnte Bezirk {bezirk} nicht lesen: {e}"))?;
         blaetter.push(parsed.analysiert.titelblatt.blatt.to_string());
     }
 

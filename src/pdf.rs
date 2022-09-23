@@ -106,7 +106,7 @@ pub fn write_titelblatt(
     titelblatt: &Titelblatt,
 ) {
     let grundbuch_von = titelblatt.grundbuch_von.clone();
-    let blatt = titelblatt.blatt;
+    let blatt = titelblatt.blatt.clone();
     let amtsgericht = titelblatt.amtsgericht.clone();
 
     let gb = format!("Grundbuch von {grundbuch_von}");
@@ -139,7 +139,7 @@ pub fn write_grundbuch(
     options: &PdfGrundbuchOptions,
 ) {
     let grundbuch_von = grundbuch.titelblatt.grundbuch_von.clone();
-    let blatt = grundbuch.titelblatt.blatt;
+    let blatt = grundbuch.titelblatt.blatt.clone();
     let amtsgericht = grundbuch.titelblatt.amtsgericht.clone();
 
     let gb = format!("Grundbuch von {grundbuch_von}");
