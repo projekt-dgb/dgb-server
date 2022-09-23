@@ -1663,6 +1663,52 @@ pub fn zugriff_genehmigen(
     Ok(())
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BenutzerGrundbuecher {
+    pub zugriff_id: String,
+    /// (Bundesland, Amtsgericht, Bezirk, Blatt)
+    pub grundbuecher: Vec<(String, String, String, String)>,
+}
+
+pub fn get_benutzer_grouped_by_zugriff(
+    ids: Vec<String>,
+) -> Result<BTreeMap<String, BenutzerGrundbuecher>, String> {
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut map = BTreeMap::new();
+
+    let mut stmt = conn.prepare(
+        "SELECT email, land, amtsgericht, bezirk, blatt FROM zugriffe WHERE id = ?1"  
+    ).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    
+    for id in ids.iter() {
+        let (email, land, amtsgericht, bezirk, blatt) = 
+        stmt.query_row(
+            rusqlite::params![id], 
+            |r| { Ok((
+                r.get::<usize, String>(0)?, 
+                r.get::<usize, String>(1)?, 
+                r.get::<usize, String>(2)?, 
+                r.get::<usize, String>(3)?, 
+                r.get::<usize, String>(4)?
+            )) })
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+        
+        let grundbuecher = map
+        .entry(email)
+        .or_insert_with(|| BenutzerGrundbuecher::default());
+
+        grundbuecher.zugriff_id = id.clone();
+        grundbuecher.grundbuecher.push((land, amtsgericht, bezirk, blatt));
+        grundbuecher.grundbuecher.sort();
+        grundbuecher.grundbuecher.dedup();
+    }
+
+    Ok(map)
+}
+
 pub fn create_zugriff(
     mount_point: MountPoint,
     id: &str,

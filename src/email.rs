@@ -83,13 +83,14 @@ pub fn send_email(
 pub fn send_zugriff_gewaehrt_email(
     to: &str,
     zugriff_id: &str,
-    grundbuecher: &[(String, String, String)] // (Amtsgericht, Blatt, Nr.)
+    // (Land, Amtsgericht, Blatt, Nr.)
+    grundbuecher: &[(String, String, String, String)]
 ) -> Result<(), String> {
 
     let server_url = crate::db::get_server_address(MountPoint::Local)?;
 
     let mut gb_short = grundbuecher.first()
-        .map(|(a, g, b)| format!("{g} Blatt {b}"))
+        .map(|(_, a, g, b)| format!("{g} Blatt {b}"))
         .ok_or(format!("Kein Grundbuch für Zugriff"))?;
 
     if grundbuecher.len() > 1 {
@@ -97,12 +98,12 @@ pub fn send_zugriff_gewaehrt_email(
     }
 
     let gb_list_plain = grundbuecher.iter()
-    .map(|(a, g, b)| format!("Amtsgericht {a}, Grundbuch von {g} Blatt {b}"))
+    .map(|(_, a, g, b)| format!("Amtsgericht {a}, Grundbuch von {g} Blatt {b}"))
     .collect::<Vec<_>>()
     .join("\r\n");
 
     let gb_list = grundbuecher.iter()
-    .map(|(a, g, b)| format!("<li>Amtsgericht {a}, Grundbuch von {g} Blatt {b}</li>"))
+    .map(|(_, a, g, b)| format!("<li>Amtsgericht {a}, Grundbuch von {g} Blatt {b}</li>"))
     .collect::<Vec<_>>()
     .join("\r\n");
 

@@ -845,14 +845,24 @@ pub mod konto {
                         code: 500,
                         text: e,
                     })?;
+                
+                let benutzer_grouped_by_email = crate::db::get_benutzer_grouped_by_zugriff(
+                    data.daten.clone()
+                ).map_err(|e| KontoJsonPostResponseError {
+                    code: 500,
+                    text: e,
+                })?;
 
-                    /* 
+                for (email, grundbuecher) in benutzer_grouped_by_email {
                     crate::email::send_zugriff_gewaehrt_email(
-                        to: &str,
-                        zugriff_id: &str,
-                        grundbuecher: &[(String, String, String)]
-                    )?;
-                    */
+                        &email,
+                        &grundbuecher.zugriff_id,
+                        &grundbuecher.grundbuecher,
+                    ).map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
+                }
             },
             ("admin", "zugriff-ablehnen") => {
                 crate::api::write_to_root_db(DbChangeOp::ZugriffAblehnen {
