@@ -217,12 +217,11 @@
 
         function submitRequest(type, id, object, f) {
             var http = new XMLHttpRequest();
-            http.open('POST', 'http://127.0.0.1:8080/zugriff', true);
+            http.open('POST', '/zugriff', true);
             http.setRequestHeader('Content-type', 'application/json');
             http.onreadystatechange = function() {
                 if (http.readyState == 4 && http.status == 200) {
                     var object = JSON.parse(http.responseText);
-                    console.log(object);
                     (f)(id, object);
                 }
             }
@@ -235,7 +234,6 @@
 
         function onSubmitOk(id, object) {
             document.getElementById("formdata").reset();
-            console.log(object);
             alert("Ihr Antrag wurde erfolgreich entgegengenommen. Bald erhalten Sie einen E-Mail mit dem Zugriffscode für Ihr Grundbuchblatt.")
             /*
                 document.cookie = "Authentication=" + (object.token || "") + "; path=/";
@@ -275,8 +273,6 @@
                 blaetter: blaetter_clean
             };
             
-            console.log(obj);
-
             submitRequest("anfrage", 0, obj, onSubmitOk);
 
             return false;

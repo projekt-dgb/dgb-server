@@ -166,7 +166,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
             text             VARCHAR(1023) NOT NULL,
             amtsgericht      VARCHAR(255) NOT NULL,
             bezirk           VARCHAR(255) NOT NULL,
-            blatt            INTEGER NOT NULL,
+            blatt            VARCHAR(255) NOT NULL,
             aktenzeichen     VARCHAR(1023)
         )",
         [],
@@ -566,8 +566,6 @@ pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, 
         other => Bundesland::from_code(other).ok_or(format!("Ungültige Bundesland-ID"))?,
     };
 
-    println!("get bezirke for bundesland_clean: {bundesland_clean:?}");
-
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -593,7 +591,6 @@ pub fn get_amtsgerichte_for_bundesland(bundesland: &str) -> Result<Vec<String>, 
 }
 
 pub fn get_bezirke_for_amtsgericht(amtsgericht: &str) -> Result<Vec<String>, String> {
-    println!("get bezirke for amtsgericht: {amtsgericht}");
     let amtsgericht_clean = match amtsgericht {
         "ALLE_AMTSGERICHTE" => {
             return {
@@ -645,7 +642,6 @@ pub fn get_blaetter_for_bezirk(
             }
         },
     };
-    println!("get blaetter for bezirk: {:?}", (land, amtsgericht, bezirk));
     let folder = Path::new(&get_data_dir(MountPoint::Local))
         .join(land.into_str())
         .join(amtsgericht)
@@ -655,18 +651,14 @@ pub fn get_blaetter_for_bezirk(
         return Ok(Vec::new());
     }
 
-    println!("lese ordner {:?}", folder.display());
-
     let paths = std::fs::read_dir(folder).map_err(|e| format!("{e}"))?;
     let mut blaetter = Vec::new();
     for path in paths {
         let path = path.map_err(|e| format!("{e}"))?.path();
-        println!("    lese {:?}", path.display());
         let file = match std::fs::read_to_string(path) {
             Ok(o) => o,
             Err(_) => continue,
         };
-        println!("    ok");
         let parsed: PdfFile = serde_json::from_str(&file)
             .map_err(|e| format!("Konnte Bezirk {bezirk} nicht lesen: {e}"))?;
         blaetter.push(parsed.analysiert.titelblatt.blatt.to_string());
@@ -704,6 +696,30 @@ pub fn delete_gemarkung(
             land.into_str()
         )
     })?;
+
+    Ok(())
+}
+
+pub fn passwort_aendern(
+    mount_point: MountPoint,
+    email: &str,
+    passwort: &str,
+) -> Result<(), String> {
+
+    if passwort.len() > 50 {
+        return Err(format!("Passwort zu lang"));
+    }
+
+    let password_hashed = hash_password(passwort).as_ref().to_vec();
+
+    let conn = Connection::open(get_db_path(mount_point))
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    conn.execute(
+        "UPDATE benutzer SET password_hashed = ?1 WHERE email = ?2",
+        rusqlite::params![password_hashed, email],
+    )
+    .map_err(|e| format!("Fehler beim Einfügen von Benutzer in Datenbank: {e}"))?;
 
     Ok(())
 }
@@ -1049,7 +1065,8 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                         row.get::<usize, String>(5)?,
                         row.get::<usize, String>(6)?,
                         row.get::<usize, String>(7)?,
-                        row.get::<usize, String>(8)?,
+                        row.get::<usize, String>(8)
+                        .or_else(|_| row.get::<usize, i32>(8).map(|s| format!("{s}")))?,
                         row.get::<usize, String>(9)?,
                         row.get::<usize, Option<String>>(10)?,
                         row.get::<usize, Option<String>>(11)?,
@@ -1058,7 +1075,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                 })
                 .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
                 .collect::<Vec<_>>();
-
+            
             data.data.insert(
                 "zugriffe".to_string(),
                 KontoTabelle {
@@ -1617,10 +1634,10 @@ pub fn zugriff_genehmigen(
 ) -> Result<(), String> {
 
     let mut conn = Connection::open(get_db_path(mount_point))
-    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank 0: {e}"))?;
 
     let tx = conn.transaction()
-    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank 1: {e}"))?;
 
     for id in ids.iter() {
         tx.execute(
@@ -1631,7 +1648,7 @@ pub fn zugriff_genehmigen(
     }
     
     tx.commit()
-    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank 4: {e}"))?;
 
     // Benutzer erstellen mit passwort = NULL (wird beim ersten Login gesetzt)
     let mut benutzer_neu = Vec::new();
@@ -1661,7 +1678,7 @@ pub fn zugriff_genehmigen(
     }
 
     let tx = conn.transaction()
-    .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank 5: {e}"))?;
 
     if let Ok(mut stmt) = tx.prepare(
         "INSERT INTO benutzer (name, email, rechte, password_hashed) VALUES (?1, ?2, ?3, NULL)"
@@ -1674,19 +1691,21 @@ pub fn zugriff_genehmigen(
                     "bearbeiter" => "bearbeiter",
                     _ => "gast",
                 },
-            ]).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank: {e}"))?;
+            ]).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank 6: {e}"))?;
         }    
     }
 
     tx.commit()
-    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank 7: {e}"))?;
 
     Ok(())
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct BenutzerGrundbuecher {
+    pub name: String,
     pub zugriff_id: String,
+    pub rechte: String,
     /// (Bundesland, Amtsgericht, Bezirk, Blatt)
     pub grundbuecher: Vec<(String, String, String, String)>,
 }
@@ -1701,11 +1720,11 @@ pub fn get_benutzer_grouped_by_zugriff(
     let mut map = BTreeMap::new();
 
     let mut stmt = conn.prepare(
-        "SELECT email, land, amtsgericht, bezirk, blatt FROM zugriffe WHERE id = ?1"  
+        "SELECT name, typ, email, land, amtsgericht, bezirk, blatt FROM zugriffe WHERE id = ?1"  
     ).map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
     
     for id in ids.iter() {
-        let (email, land, amtsgericht, bezirk, blatt) = 
+        let (name, rechte, email, land, amtsgericht, bezirk, blatt) = 
         stmt.query_row(
             rusqlite::params![id], 
             |r| { Ok((
@@ -1713,14 +1732,18 @@ pub fn get_benutzer_grouped_by_zugriff(
                 r.get::<usize, String>(1)?, 
                 r.get::<usize, String>(2)?, 
                 r.get::<usize, String>(3)?, 
-                r.get::<usize, String>(4)?
+                r.get::<usize, String>(4)?,
+                r.get::<usize, String>(5)?,
+                r.get::<usize, String>(6)?, 
             )) })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
         
         let grundbuecher = map
         .entry(email)
         .or_insert_with(|| BenutzerGrundbuecher::default());
-
+        
+        grundbuecher.rechte = rechte.clone().replace("\"", "");
+        grundbuecher.name = name.clone();
         grundbuecher.zugriff_id = id.clone();
         grundbuecher.grundbuecher.push((land, amtsgericht, bezirk, blatt));
         grundbuecher.grundbuecher.sort();
@@ -1728,6 +1751,24 @@ pub fn get_benutzer_grouped_by_zugriff(
     }
 
     Ok(map)
+}
+
+pub fn zugriff_benutzer_exists(
+    zugriff_id: &str,
+) -> Result<bool, String> {
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let result =  conn.query_row(
+        "SELECT COUNT(*) FROM benutzer WHERE password_hashed IS NOT NULL AND email = (SELECT email FROM zugriffe WHERE id = ?1 LIMIT 1)",
+        rusqlite::params![zugriff_id],
+        |r| match r.get::<usize, i32>(0)? {
+            1 => Ok(true),
+            _ => Ok(false),
+        },
+    ).map_err(|e| format!("{e}"))?;
+
+    Ok(result)
 }
 
 pub fn create_zugriff(
@@ -1743,6 +1784,7 @@ pub fn create_zugriff(
     bezirk: &str,
     blatt: &str,
 ) -> Result<(), String> {
+
     let conn = Connection::open(get_db_path(mount_point))
     .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
@@ -1760,7 +1802,7 @@ pub fn create_zugriff(
         rusqlite::params![
             id, name, email,
             typ.to_string(), grund, land,
-            amtsgericht, bezirk, blatt, datum
+            amtsgericht, bezirk, format!("{blatt}"), datum
         ],
     )
     .map_err(|e| format!("Fehler beim Einfügen von Zugriff: {e}"))?;

@@ -40,6 +40,8 @@ pub fn send_email(
     use lettre::transport::smtp::authentication::Mechanism;
     use lettre::transport::smtp::PoolConfig;
 
+    let smtp_config = crate::db::get_email_config()?;
+
     let email = Message::builder()
         .from(from.parse().map_err(|e| format!("Ungültige Sender-E-Mail: {e}"))?)
         .to(to
@@ -61,15 +63,13 @@ pub fn send_email(
         )
         .map_err(|_| format!("Ungültige E-Mail"))?;
 
-    let smtp_config = crate::db::get_email_config()?;
-
     let mailer = SmtpTransport::starttls_relay(&smtp_config.smtp_adresse)
         .map_err(|e| format!("{e}"))?
         .credentials(Credentials::new(
             smtp_config.email.clone(),
             smtp_config.passwort.clone(),
         ))
-        .authentication(vec![Mechanism::Plain])
+        .authentication(vec![Mechanism::Plain, Mechanism::Login, Mechanism::Xoauth2])
         .pool_config(PoolConfig::new().max_size(20))
         .build();
 
@@ -157,9 +157,14 @@ Die Einstellung für Benachrichtigungen können Sie in Ihrem Konto über \"Einst
         .map_err(|e| format!("{e}"))?;
     
     let host = url.host_str().unwrap_or("");
-    
+
+    // Die meisten SMTP-Server überprüfen die Sender-Adresse,
+    // E-Mail muss mit den Login-Daten übereinstimmen
+    let smtp_config = crate::db::get_email_config()?;
+    let email = smtp_config.email.clone();
+
     send_email(
-        &format!("Grundbuch <noreply@{host}>"), 
+        &format!("Grundbuch <{email}>"), 
         to, 
         &format!("Ihr Zugriff auf Grundbuch {gb_short} wurde gewährt"), 
         &html, 

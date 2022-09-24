@@ -14,15 +14,46 @@
             </ul>
         </nav>
         <h1>Passwort eingeben</h1>
-        <div id="main-container-flex-row">
+        <div id="main-container-flex-row" style="flex-direction: column; line-height: 2;">
             
             <p>Es scheint, als ob Sie sich zum ersten Mal anmelden.</p>
             <p>Bitte geben Sie ein Passwort für Ihr Konto ein:</p>
             
             <form id="formdata" onsubmit="onPasswortSubmit(event)" method="post">
-                <input type="password" placeholder="Passwort eingeben..."></input>
-                <button type="submit">Konto erstellen</button>
+                <input id="passwort" type="password" placeholder="Passwort eingeben..." style="display: block;"></input>
+                <button type="submit" style="margin: 0px;">Konto erstellen</button>
             </form>
         </div>
     </body>
+
+    <script>
+
+        function onPasswortSubmit(event) {
+            event.preventDefault();
+
+            var passwort = document.getElementById("passwort").value;
+            var urlParams = new URLSearchParams(window.location.search);
+            var zugriff = urlParams.get("id");
+            if (!zugriff) {
+                return false;
+            }
+
+            var http = new XMLHttpRequest();
+            http.open('POST', '/konto-neu', true);
+            http.setRequestHeader('Content-type', 'application/json');
+            http.onreadystatechange = function() {
+                if (http.readyState == 4 && http.status == 200) {
+                    var object = JSON.parse(http.responseText);
+                    document.getElementById("formdata").reset();
+                    document.cookie = "Authentication=" + (object.token || "") + "; path=/";
+                    window.location.href = '/konto';
+                }
+            }
+            http.send(JSON.stringify({
+                zugriff: zugriff,
+                passwort: passwort,
+            }));
+            return false;
+        }
+    </script>
 </html>

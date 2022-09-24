@@ -467,7 +467,7 @@ async fn init(app_state: &AppState) -> Result<(), String> {
         }
 
         let sync_server_ip = crate::k8s::get_sync_server_ip().await?;
-        println!("ok dgb-sync = {sync_server_ip}");
+        println!("OK: dgb-sync = {sync_server_ip}");
 
         let database_bytes = crate::db::get_db_bytes().await?;
         let _ = std::fs::create_dir_all(get_data_dir(MountPoint::Local));
@@ -607,6 +607,7 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
                 .service(crate::api::login::login_post)
                 .service(crate::api::konto::konto_get)
                 .service(crate::api::konto::konto_post)
+                .service(crate::api::konto::konto_post_neu)
                 .service(crate::api::konto::konto_generiere_schluessel)
                 .service(crate::api::suche::suche)
                 .service(crate::api::download::download_gbx)
