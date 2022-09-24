@@ -53,6 +53,16 @@ function getActiveSectionName() {
         } else {
             return "";
         }
+    } else if (kontotyp == "gast") {
+        if (active_sidebar == 0) {
+            return "blaetter";
+        } else if (active_sidebar == 1) {
+            return "abonnements";
+        } else if (active_sidebar == 2) {
+            return "meine-kontodaten";
+        } else {
+            return "";
+        }
     } else {
         return "";
     }
@@ -134,6 +144,9 @@ function selectAllVisible() {
             selected.push(bezirk_id);
         } else if (kontotyp == "admin" && active_section == "meine-kontodaten") {
         
+        } else if (kontotyp == "gast" && active_section == "blaetter") {
+            var blatt_id = row[0] + "/" + row[1] + "/" + row[2] + "/" + row[3];
+            selected.push(blatt_id);
         }
     }
     selected.sort();
@@ -176,7 +189,14 @@ function renderHeader(id) {
         spalten = [
             "Einstellung",
             "Wert"
-        ]
+        ];
+    } else if (kontotyp == "gast" && id == "blaetter") {
+        spalten = [
+            "Land",
+            "Amtsgericht",
+            "Bezirk",
+            "Blatt"
+        ];
     }
 
     var header_column_node = document.createElement("div");
@@ -199,6 +219,12 @@ function renderHeader(id) {
     });
     check_uncheck_all_node.style.minWidth = "15px";
     check_uncheck_all_node_div.appendChild(check_uncheck_all_node);
+    header_column_node.appendChild(check_uncheck_all_node_div);
+
+    var check_uncheck_all_node_div = document.createElement("div");
+    check_uncheck_all_node_div.style.maxWidth = "18px";
+    check_uncheck_all_node_div.style.minWidth = "18px";
+    check_uncheck_all_node_div.style.borderBottom = "2px solid grey";
     header_column_node.appendChild(check_uncheck_all_node_div);
 
     var non_check_node = document.createElement("div");
@@ -675,7 +701,8 @@ function renderRows(id) {
             non_check_node.appendChild(cell_node);
 
             row_node.appendChild(non_check_node);
-        } else if (kontotyp == "admin" && id == "meine-kontodaten") {
+        } else if ((kontotyp == "admin" && id == "meine-kontodaten") ||
+                  (kontotyp == "gast" && id == "meine-kontodaten")) {
 
             var einstellung_id = e;
             var einstellung = row[1];
@@ -731,6 +758,59 @@ function renderRows(id) {
             cell_node.appendChild(cell_text);
 
             non_check_node.appendChild(cell_node);
+
+            row_node.appendChild(non_check_node);
+        } else if (kontotyp == "gast" && id == "blaetter") {
+
+            var land = row[0];
+            var amtsgericht = row[1];
+            var bezirk = row[2];
+            var blatt = row[3];
+            var blatt_id = land + "/" + bezirk + "/" + amtsgericht + "/" + blatt;
+
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+            check_node.dataset.id = blatt_id;
+            check_node.checked = selected.includes(blatt_id);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+            
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            row_node.appendChild(check_uncheck_all_node_div);
+
+            var non_check_node = document.createElement("div");
+
+            var values = [land, amtsgericht, bezirk, blatt];
+
+            for (var q = 0; q < array.length; q++) {
+                var e = values[q];
+                var cell_node = document.createElement("div");
+                cell_node.classList.add("row-cell");
+                cell_node.style.width = "25%";
+                cell_node.style.minWidth = "25%";
+                cell_node.style.maxWidth = "25%";
+                var cell_text = document.createElement("p");
+                var textnode1 = document.createTextNode(e);
+                cell_text.appendChild(textnode1);
+                cell_node.appendChild(cell_text);
+                non_check_node.appendChild(cell_node);
+            }
 
             row_node.appendChild(non_check_node);
         }
@@ -842,8 +922,12 @@ function renderActions(id) {
         loeschen.textContent = "Bezirk löschen";
         loeschen.onclick = function() { bezirkLoeschen(); }
         actions_data.appendChild(loeschen);
+    } else if (kontotyp == "gast" && id == "blaetter") {
+        var herunterladen = document.createElement("button");
+        herunterladen.textContent = "Ausgewählte Blätter als .zip herunterladen";
+        herunterladen.onclick = function(){ blaetterAlsZip(); };
+        actions_data.appendChild(herunterladen);
     }
-    
     return actions_data;
 }
 
@@ -899,6 +983,10 @@ function zugriffGenehmigen() {
 
 function zugriffAblehnen() {
     postToServer("zugriff-ablehnen", selected);
+}
+
+function blaetterAlsZip() {
+    postToServer("blaetter-als-zip", selected);
 }
 
 function benutzerBearbeiten(target) {

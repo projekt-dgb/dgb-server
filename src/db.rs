@@ -191,6 +191,16 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
         [],
     )?;
 
+    conn.execute(
+    "CREATE TABLE IF NOT EXISTS grundbuecher (
+            land            VARCHAR(255) NOT NULL,
+            amtsgericht     VARCHAR(1024) NOT NULL,
+            bezirk          VARCHAR(1024) NOT NULL,
+            blatt           VARCHAR(20) NOT NULL
+        )",
+        [],
+    )?;
+
     seed_benutzer_einstellungen(mount_point)?;
 
     Ok(())
@@ -1442,6 +1452,29 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                         .collect(),
                 },
             );
+
+            let verfuegbare_grundbuecher = crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(
+                &benutzer_info,
+            ).unwrap_or_default();
+
+            data.data.insert(
+                "blaetter".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "land".to_string(),
+                        "amtsgericht".to_string(),
+                        "bezirk".to_string(),
+                        "blatt".to_string(),
+                    ],
+                    daten: verfuegbare_grundbuecher
+                        .into_iter()
+                        .map(|(l, a, g, b)| (
+                            format!("{l}/{a}/{g}/{b}"),
+                            vec![l, a, g, b],
+                        ))
+                        .collect(),
+                },
+            );
         }
         _ => {}
     }
@@ -1708,6 +1741,67 @@ pub struct BenutzerGrundbuecher {
     pub rechte: String,
     /// (Bundesland, Amtsgericht, Bezirk, Blatt)
     pub grundbuecher: Vec<(String, String, String, String)>,
+}
+
+/// (Bundesland, Amtsgericht, Bezirk, Blatt)
+pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
+    benutzer: &BenutzerInfo,
+) -> Result<Vec<(String, String, String, String)>, String> {
+
+    use std::collections::BTreeSet;
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+    .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT land, amtsgericht, bezirk, blatt FROM zugriffe WHERE email = ?1"
+    ).map_err(|e| format!("{e}"))?;
+    
+    let zugriffe = stmt.query_map(
+        rusqlite::params![benutzer.email],
+        |r| Ok((
+            r.get::<usize, String>(0)?, 
+            r.get::<usize, String>(1)?,
+            r.get::<usize, String>(2)?, 
+            r.get::<usize, String>(3)?
+        )), 
+    )
+    .map_err(|e| format!("{e}"))?
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| format!("{e}"))?;
+
+    if zugriffe.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut alle_grundbuecher = conn.prepare(
+        "SELECT land, amtsgericht, bezirk, blatt FROM grundbuchblaetter"
+    ).map_err(|e| format!("{e}"))?;
+
+    let grundbuchblaetter = alle_grundbuecher.query_map(
+        rusqlite::params![],
+        |r| Ok((
+            r.get::<usize, String>(0)?, 
+            r.get::<usize, String>(1)?,
+            r.get::<usize, String>(2)?, 
+            r.get::<usize, String>(3)?
+        )), 
+    )
+    .map_err(|e| format!("{e}"))?
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|e| format!("{e}"))?;
+
+    if grundbuchblaetter.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let zugriffe = zugriffe.into_iter().collect::<BTreeSet<_>>();
+    let grundbuchblaetter = grundbuchblaetter.into_iter().collect::<BTreeSet<_>>();
+    let result = grundbuchblaetter.intersection(&zugriffe).cloned().collect::<Vec<_>>();
+    
+    Ok(result)
 }
 
 pub fn get_benutzer_grouped_by_zugriff(
