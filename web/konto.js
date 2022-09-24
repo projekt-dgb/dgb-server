@@ -185,7 +185,10 @@ function renderHeader(id) {
             "Amtsgericht",
             "Bezirk",
         ];
-    } else if (kontotyp == "admin" && id == "meine-kontodaten") {
+    } else if (
+        (kontotyp == "admin" && id == "meine-kontodaten") || 
+        (kontotyp == "gast" && id == "meine-kontodaten")
+    ) {
         spalten = [
             "Einstellung",
             "Wert"
@@ -196,6 +199,13 @@ function renderHeader(id) {
             "Amtsgericht",
             "Bezirk",
             "Blatt"
+        ];
+    } else if (kontotyp == "gast" && id == "abonnements") {
+        spalten = [
+            "Amtsgericht",
+            "Bezirk",
+            "Blatt",
+            "Aktenzeichen"
         ];
     }
 
@@ -221,11 +231,13 @@ function renderHeader(id) {
     check_uncheck_all_node_div.appendChild(check_uncheck_all_node);
     header_column_node.appendChild(check_uncheck_all_node_div);
 
-    var check_uncheck_all_node_div = document.createElement("div");
-    check_uncheck_all_node_div.style.maxWidth = "18px";
-    check_uncheck_all_node_div.style.minWidth = "18px";
-    check_uncheck_all_node_div.style.borderBottom = "2px solid grey";
-    header_column_node.appendChild(check_uncheck_all_node_div);
+    if (kontotyp == "gast" && id == "blaetter") {
+        var check_uncheck_all_node_div = document.createElement("div");
+        check_uncheck_all_node_div.style.maxWidth = "18px";
+        check_uncheck_all_node_div.style.minWidth = "18px";
+        check_uncheck_all_node_div.style.borderBottom = "2px solid grey";
+        header_column_node.appendChild(check_uncheck_all_node_div);    
+    }
 
     var non_check_node = document.createElement("div");
     non_check_node.style.display = "flex";
@@ -283,7 +295,11 @@ function rowIsValid(cells, filter) {
 function renderRows(id) {
     var node_data = document.createElement("div");
     var kontoDaten = getKontoDaten();
-    var keys = Object.keys(kontoDaten.data[id].daten);
+    var data2 = kontoDaten.data[id];
+    if (!data2) {
+        return node_data;
+    }
+    var keys = Object.keys(data2.daten);
     // sort_by(keys, filter_by)
     for (var q = 0; q < keys.length; q++) {
         var e = keys[q];
@@ -798,7 +814,55 @@ function renderRows(id) {
 
             var values = [land, amtsgericht, bezirk, blatt];
 
-            for (var q = 0; q < array.length; q++) {
+            for (var q = 0; q < values.length; q++) {
+                var e = values[q];
+                var cell_node = document.createElement("div");
+                cell_node.classList.add("row-cell");
+                cell_node.style.width = "25%";
+                cell_node.style.minWidth = "25%";
+                cell_node.style.maxWidth = "25%";
+                var cell_text = document.createElement("p");
+                var textnode1 = document.createTextNode(e);
+                cell_text.appendChild(textnode1);
+                cell_node.appendChild(cell_text);
+                non_check_node.appendChild(cell_node);
+            }
+
+            row_node.appendChild(non_check_node);
+        } else if (kontotyp == "gast" && id == "abonnements") {
+
+            var abo_id = row[0];
+            var amtsgericht = row[1];
+            var bezirk = row[2];
+            var blatt = row[3];
+            var aktenzeichen = row[4];
+
+            var check_uncheck_all_node_div = document.createElement("div");
+            check_uncheck_all_node_div.style.flexDirection = "column";
+            check_uncheck_all_node_div.style.padding = "5px 10px";
+            check_uncheck_all_node_div.style.flexGrow = "0";
+            check_uncheck_all_node_div.style.maxWidth = "18px";
+            check_uncheck_all_node_div.style.minWidth = "18px";
+            var check_node = document.createElement("input");
+            check_node.type = "checkbox";
+            check_node.style.minWidth = "15px";
+            check_node.dataset.id = abo_id;
+            check_node.checked = selected.includes(abo_id);
+            check_node.addEventListener('change', function(event) {
+                if (event.currentTarget.checked) {
+                    addToSelection(event.currentTarget);
+                } else {
+                    removeFromSelection(event.currentTarget);
+                }
+            });
+            check_uncheck_all_node_div.appendChild(check_node);
+            row_node.appendChild(check_uncheck_all_node_div);
+
+            var non_check_node = document.createElement("div");
+
+            var values = [amtsgericht, bezirk, blatt, aktenzeichen];
+
+            for (var q = 0; q < values.length; q++) {
                 var e = values[q];
                 var cell_node = document.createElement("div");
                 cell_node.classList.add("row-cell");
@@ -927,6 +991,16 @@ function renderActions(id) {
         herunterladen.textContent = "Ausgewählte Blätter als .zip herunterladen";
         herunterladen.onclick = function(){ blaetterAlsZip(); };
         actions_data.appendChild(herunterladen);
+    } else if (kontotyp == "gast" && id == "abonnements") {
+        var neu = document.createElement("button");
+        neu.textContent = "Neues Abonnement";
+        neu.onclick = function(){ aboNeu(); };
+        actions_data.appendChild(neu);
+
+        var loeschen = document.createElement("button");
+        loeschen.textContent = "Ausgewählte Abonnements beenden";
+        loeschen.onclick = function(){ aboBeenden(); };
+        actions_data.appendChild(loeschen);
     }
     return actions_data;
 }
@@ -1001,6 +1075,22 @@ function benutzerBearbeiten(target) {
         target_ids.push(s);
     }
     postToServer("benutzer-bearbeite-kontotyp", target_ids);
+}
+
+function aboNeu() {
+    var amtsgericht = window.prompt("Amtsgericht", "");
+    if (!amtsgericht) { return; }
+    var bezirk = window.prompt("Bezirk", "");
+    if (!bezirk) { return; }
+    var blatt = window.prompt("Blatt", "");
+    if (!blatt) { return; }
+    var aktenzeichen = window.prompt("Aktenzeichen", "");
+    if (!aktenzeichen) { return; }
+    postToServer("abo-neu", [amtsgericht, bezirk, blatt, aktenzeichen]);
+}
+
+function aboLoeschen() {
+    postToServer("abo-loeschen", selected);
 }
 
 function benutzerNeu() {

@@ -1021,6 +1021,20 @@ pub fn get_email_config() -> Result<SmtpConfig, String> {
     })
 }
 
+pub fn get_active_publickey_for_benutzer(
+    benutzer: &BenutzerInfo,
+) -> Result<Option<String>, String> {
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+        .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    conn.query_row(
+        "SELECT publickey.fingerprint FROM benutzer WHERE benutzer = ?1", 
+        rusqlite::params![benutzer.id],
+        |r| r.get::<usize, Option<String>>(0),
+    ).map_err(|_| format!("Fehler beim Auslesen der Einstellungen"))
+}
+
 pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, String> {
     let mut data = KontoData::default();
     data.kontotyp = benutzer_info.rechte.clone();
@@ -1261,37 +1275,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                 },
             );
 
-            // Benutzer
-            let mut stmt = conn
-                .prepare(
-                    "
-                SELECT 
-                    benutzer.name, 
-                    benutzer.email, 
-                    benutzer.rechte, 
-                    publickeys.pubkey, 
-                    publickeys.fingerprint 
-                FROM benutzer 
-                LEFT JOIN publickeys
-                ON publickeys.email = benutzer.email
-                WHERE benutzer.id = ?1
-            ",
-                )
-                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
-
-            let benutzer = stmt
-                .query_map(rusqlite::params![benutzer_info.id], |row| {
-                    Ok((
-                        row.get::<usize, String>(0)?,
-                        row.get::<usize, String>(1)?,
-                        row.get::<usize, String>(2)?,
-                        row.get::<usize, Option<String>>(3)?,
-                        row.get::<usize, Option<String>>(4)?,
-                    ))
-                })
-                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-                .collect::<Vec<_>>();
-
+            // Einstellungen
             data.data.insert(
                 "meine-kontodaten".to_string(),
                 KontoTabelle {
@@ -1408,49 +1392,25 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
             );
         }
         "gast" => {
-            let mut stmt = conn
-                .prepare(
-                    "
-                SELECT 
-                    benutzer.name, 
-                    benutzer.email, 
-                    benutzer.rechte
-                FROM benutzer 
-                WHERE benutzer.id = ?1
-            ",
-                )
-                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 5"))?;
 
-            let benutzer = stmt
-                .query_map(rusqlite::params![benutzer_info.id], |row| {
-                    Ok((
-                        row.get::<usize, String>(0)?,
-                        row.get::<usize, String>(1)?,
-                        row.get::<usize, String>(2)?,
-                    ))
-                })
-                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-                .collect::<Vec<_>>();
+            // Extra Kontodaten
+            let publickey = match crate::db::get_active_publickey_for_benutzer(&benutzer_info) {
+                Ok(o) => o,
+                Err(_) => None,
+            };
 
             data.data.insert(
-                "meine-kontodaten".to_string(),
+                "kontodaten-extra".to_string(),
                 KontoTabelle {
                     spalten: vec![
-                        "name".to_string(),
-                        "email".to_string(),
-                        "rechte".to_string(),
+                        "wert".to_string(),
                     ],
-                    daten: benutzer
-                        .into_iter()
-                        .filter_map(|row| {
-                            let row = row.ok()?;
-                            Some((
-                                row.1.clone(),
-                                vec![row.0.clone(), row.1.clone(), row.2.clone()],
-                            ))
-                        })
-                        .collect(),
-                },
+                    daten: {
+                        let mut b = BTreeMap::new();
+                        b.insert("konto.publickey".to_string(), vec![publickey.unwrap_or_default()]);
+                        b
+                    }
+                }
             );
 
             let verfuegbare_grundbuecher = crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(
@@ -1473,6 +1433,30 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                             vec![l, a, g, b],
                         ))
                         .collect(),
+                },
+            );
+
+            // Einstellungen
+            data.data.insert(
+                "meine-kontodaten".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "id".to_string(),
+                        "global".to_string(),
+                        "einstellung".to_string(),
+                        "wert".to_string(),
+                    ],
+                    daten: {
+                        let mut d = BTreeMap::new();
+                        for (id, (k, v)) in get_einstellungen_fuer_benutzer(MountPoint::Local, &benutzer_info)?.into_iter() {
+                            d.insert(id.to_string(), vec![
+                                "false".to_string(),
+                                k.to_string(),
+                                v.to_string(),
+                            ]);
+                        }
+                        d
+                    },
                 },
             );
         }

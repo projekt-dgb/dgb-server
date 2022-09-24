@@ -916,6 +916,15 @@ pub mod konto {
                         })?;
                 }
             },
+            ("gast", "blaetter-als-zip") => {
+
+            },
+            ("gast", "abo-neu") => {
+
+            },
+            ("gast", "abo-loeschen") => {
+
+            },
             _ => {
                 return Err(KontoJsonPostResponseError {
                     code: 500,
@@ -1019,6 +1028,7 @@ pub mod commit {
     use crate::api::index::ZugriffTyp;
     use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
     use chrono::{DateTime, Utc};
+    use rusqlite::Connection;
     use serde_derive::{Deserialize, Serialize};
     use std::path::Path;
 
@@ -1150,6 +1160,49 @@ pub mod commit {
             let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
             sync_changes_to_disk(&upload_changeset, &local_path)?;
             let _ = commit_changes(&app_state, &local_path, &benutzer, &upload_changeset).await;
+        }
+
+        // Alle neuen Grundbuch-Blätter registrieren
+        if upload_changeset.data.neu.is_empty() {
+            return Ok(response_ok());
+        }
+
+        let conn = Connection::open(&get_db_path(MountPoint::Local))
+        .map_err(|e| response_err(500, format!("{e}")))?;
+        
+        let mut stmt = conn.prepare(
+            "INSERT INTO grundbuecher (land, amtsgericht, bezirk, blatt) VALUES (?1, ?2, ?3, ?4)"
+        ).map_err(|e| response_err(500, format!("{e}")))?;
+        
+        let gemarkungsbezirke = crate::db::get_gemarkungen()
+            .unwrap_or_default();
+
+        for neu in upload_changeset.data.neu.iter() {
+            
+            let land = gemarkungsbezirke
+            .iter()
+            .filter(|(_, ag, bez)| {
+                *ag == neu.analysiert.titelblatt.amtsgericht &&
+                *bez == neu.analysiert.titelblatt.grundbuch_von
+            })
+            .map(|(l, _, _)| l)
+            .next();
+
+            let land = match land {
+                Some(s) => s,
+                None => continue,
+            };
+
+            let _ = stmt.execute(rusqlite::params![
+                land.to_string(),
+                neu.analysiert.titelblatt.amtsgericht,
+                neu.analysiert.titelblatt.grundbuch_von,
+                neu.analysiert.titelblatt.blatt.to_string(),
+            ]);
+        }
+
+        if app_state.k8s_aktiv() && app_state.sync_server() {
+            let _ = crate::api::pull::pull_db_internal(&app_state).await;
         }
 
         Ok(response_ok())
@@ -1501,7 +1554,7 @@ pub mod pull {
         }
     }
 
-    async fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
+    pub async fn pull_db_internal(app_state: &AppState) -> Result<HttpResponse, HttpResponse> {
         let response_ok = || {
             HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string(&PullResponse::StatusOk(PullResponseOk {}))
