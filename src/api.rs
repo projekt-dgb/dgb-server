@@ -2052,6 +2052,42 @@ pub mod download {
         pub text: String,
     }
 
+    #[get("/download/client/{platform}")]
+    async fn download_client(
+        path: web::Path<String>,
+    ) -> impl Responder {
+
+        let links = crate::db::get_globale_einstellungen(MountPoint::Local).unwrap_or_default();
+        let windows = links.iter()
+            .filter(|(id, (k, v))| k == "download.release.url.windows")
+            .map(|(id, (k, v))| v.clone())
+            .next()
+            .unwrap_or_default();
+        
+        let linux = links.iter()
+        .filter(|(id, (k, v))| k == "download.release.url.linux")
+        .map(|(id, (k, v))| v.clone())
+        .next()
+        .unwrap_or_default();
+        
+        let mac = links.iter()
+        .filter(|(id, (k, v))| k == "download.release.url.mac")
+        .map(|(id, (k, v))| v.clone())
+        .next()
+        .unwrap_or_default();
+        
+        let location = match path.as_str() {
+            "windows" => windows,
+            "linux" => linux,
+            "mac" => mac,
+            _ => String::new(),
+        };
+
+        HttpResponse::TemporaryRedirect()
+        .append_header(("Location", location.as_str()))
+        .finish()
+    }
+
     #[get("/download/gbx/{amtsgericht}/{grundbuch_von}/{blatt}")]
     async fn download_gbx(
         path: web::Path<(String, String, usize)>,

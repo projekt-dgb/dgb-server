@@ -279,6 +279,40 @@ function renderSidebar() {
         node.appendChild(textnode);
         document.getElementById("sidebar").appendChild(node);    
     }
+
+    document.getElementById("sidebar").appendChild(document.createElement("br"));    
+
+    var node = document.createElement("a");
+    node.style.display = "flex";
+    node.tabIndex = "1";
+    node.style.cursor = "pointer";
+    node.style.width = "100%";
+    node.style.textDecoration = "underline";
+    node.onclick = function(){ benutzerAbmelden() };
+    node.onkeyup = function(e){ if (e.key == "Enter") { benutzerAbmelden() } };
+
+    var textnode = document.createTextNode("Abmelden");
+    node.appendChild(textnode);
+    document.getElementById("sidebar").appendChild(node);    
+}
+
+function benutzerAbmelden() {
+    var cookies = document.cookie.split("; ");
+    for (var c = 0; c < cookies.length; c++) {
+        var d = window.location.hostname.split(".");
+        while (d.length > 0) {
+            var cookieBase = encodeURIComponent(cookies[c].split(";")[0].split("=")[0]) + '=; expires=Thu, 01-Jan-1970 00:00:01 GMT; domain=' + d.join('.') + ' ;path=';
+            var p = location.pathname.split('/');
+            document.cookie = cookieBase + '/';
+            while (p.length > 0) {
+                document.cookie = cookieBase + p.join('/');
+                p.pop();
+            };
+            d.shift();
+        }
+    }
+
+    window.location.reload();
 }
 
 function rowIsValid(cells, filter) {

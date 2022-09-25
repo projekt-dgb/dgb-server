@@ -613,6 +613,7 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
                 .service(crate::api::download::download_gbx)
                 .service(crate::api::download::dowload_pdf)
                 .service(crate::api::download::dowload_aenderung_pdf)
+                .service(crate::api::download::download_client)
                 .service(crate::api::upload::upload)
                 .service(crate::api::abo::abo_neu)
                 .service(crate::api::abo::abo_loeschen)
