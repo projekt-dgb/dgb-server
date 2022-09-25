@@ -63,6 +63,18 @@ function getActiveSectionName() {
         } else {
             return "";
         }
+    } else if (kontotyp == "bearbeiter") {
+        if (active_sidebar == 0) {
+            return "aenderungen";
+        } else if (active_sidebar == 1) {
+            return "blaetter";
+        } else if (active_sidebar == 2) {
+            return "abonnements";
+        }  else if (active_sidebar == 3) {
+            return "meine-kontodaten";
+        } else {
+            return "";
+        }
     } else {
         return "";
     }
@@ -160,7 +172,8 @@ function deselectAll() {
 
 function renderHeader(id) {
     var spalten = [];
-    if (kontotyp == "admin" && id == "aenderungen") {
+    if ((kontotyp == "admin" && id == "aenderungen") ||
+        (kontotyp == "bearbeiter" && id == "aenderungen")) {
         spalten = [
             "Name",
             "Datum / Beschreibung"
@@ -187,20 +200,28 @@ function renderHeader(id) {
         ];
     } else if (
         (kontotyp == "admin" && id == "meine-kontodaten") || 
+        (kontotyp == "bearbeiter" && id == "meine-kontodaten") ||
         (kontotyp == "gast" && id == "meine-kontodaten")
     ) {
         spalten = [
             "Einstellung",
             "Wert"
         ];
-    } else if (kontotyp == "gast" && id == "blaetter") {
+    } else if (
+        (kontotyp == "gast" && id == "blaetter") ||
+        (kontotyp == "admin" && id == "blaetter") ||
+        (kontotyp == "bearbeiter" && id == "blaetter")
+    ) {
         spalten = [
             "Land",
             "Amtsgericht",
             "Bezirk",
             "Blatt"
         ];
-    } else if (kontotyp == "gast" && id == "abonnements") {
+    } else if (
+        (kontotyp == "gast" && id == "abonnements") ||
+        (kontotyp == "bearbeiter" && id == "abonnements")
+    ) {
         spalten = [
             "Amtsgericht",
             "Bezirk",
@@ -575,7 +596,6 @@ function renderRows(id) {
             var benutzer_email = row[1]; 
             var benutzer_rechte = row[2]; 
             var pubkey_fingerprint = row[4]; 
-            var pubkey = row[3]; 
 
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.flexDirection = "column";
@@ -751,8 +771,10 @@ function renderRows(id) {
             non_check_node.appendChild(cell_node);
 
             row_node.appendChild(non_check_node);
-        } else if ((kontotyp == "admin" && id == "meine-kontodaten") ||
-                  (kontotyp == "gast" && id == "meine-kontodaten")) {
+        } else if (
+            (kontotyp == "admin" && id == "meine-kontodaten") ||
+            (kontotyp == "bearbeiter" && id == "meine-kontodaten") ||
+            (kontotyp == "gast" && id == "meine-kontodaten")) {
 
             var einstellung_id = e;
             var einstellung = row[1];
@@ -810,7 +832,10 @@ function renderRows(id) {
             non_check_node.appendChild(cell_node);
 
             row_node.appendChild(non_check_node);
-        } else if (kontotyp == "gast" && id == "blaetter") {
+        } else if (
+            (kontotyp == "gast" && id == "blaetter") ||
+            (kontotyp == "bearbeiter" && id == "blaetter") 
+        ) {
 
             var land = row[0];
             var amtsgericht = row[1];
@@ -914,6 +939,26 @@ function renderRows(id) {
         }
 
         node_data.appendChild(row_node);
+    }
+
+    if (kontotyp == "bearbeiter" && id == "meine-kontodaten") {
+
+        var pubkey_fingerprint = kontoDaten.data["kontodaten-extra"].daten["konto.publickey"][0];
+        var benutzer_email = kontoDaten.data["kontodaten-extra"].daten["konto.email"][0];
+        var benutzer_name = kontoDaten.data["kontodaten-extra"].daten["konto.name"][0];
+
+        var cell_text = document.createElement("button");
+        cell_text.textContent = "Öffentlicher Schlüssel";
+        cell_text.dataset.email = benutzer_email;
+        cell_text.dataset.name = benutzer_name;
+
+        if (pubkey_fingerprint == "") {
+            cell_text.textContent = "Schlüsselpaar generieren";
+            cell_text.onclick = function() { generiereSchluesselPaar(this); }
+        } else {
+            cell_text.textContent = "Schlüssel " + pubkey_fingerprint.substr(0, 6) + "";
+        }
+        node_data.appendChild(cell_text);
     }
     return node_data;
 }  

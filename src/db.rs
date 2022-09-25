@@ -1029,8 +1029,8 @@ pub fn get_active_publickey_for_benutzer(
         .map_err(|_| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
     conn.query_row(
-        "SELECT publickey.fingerprint FROM benutzer WHERE benutzer = ?1", 
-        rusqlite::params![benutzer.id],
+        "SELECT fingerprint FROM publickeys WHERE email = ?1", 
+        rusqlite::params![benutzer.email],
         |r| r.get::<usize, Option<String>>(0),
     ).map_err(|_| format!("Fehler beim Auslesen der Einstellungen"))
 }
@@ -1307,11 +1307,35 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
             );
         }
         "bearbeiter" => {
+
+            // Extra Kontodaten
+            let publickey = match crate::db::get_active_publickey_for_benutzer(&benutzer_info) {
+                Ok(o) => o,
+                Err(_) => None,
+            };
+
+            data.data.insert(
+                "kontodaten-extra".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "wert".to_string(),
+                    ],
+                    daten: {
+                        let mut b = BTreeMap::new();
+                        b.insert("konto.publickey".to_string(), vec![publickey.unwrap_or_default()]);
+                        b.insert("konto.email".to_string(), vec![benutzer_info.email.clone()]);
+                        b.insert("konto.name".to_string(), vec![benutzer_info.name.clone()]);
+                        b
+                    }
+                }
+            );
+
+            // Änderungen des Bearbeiters
             let aenderungen = crate::db::get_aenderungen(AenderungFilter::FilterEmail(
                 benutzer_info.email.clone(),
             ));
             data.data.insert(
-                "meine-aenderungen".to_string(),
+                "aenderungen".to_string(),
                 KontoTabelle {
                     spalten: vec![
                         "id".to_string(),
@@ -1331,88 +1355,57 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                 },
             );
 
-            // Benutzer
-            let mut stmt = conn
-                .prepare(
-                    "
-                SELECT 
-                    benutzer.name, 
-                    benutzer.email, 
-                    benutzer.rechte, 
-                    publickeys.pubkey, 
-                    publickeys.fingerprint 
-                FROM benutzer 
-                LEFT JOIN publickeys
-                ON publickeys.email = benutzer.email
-                WHERE benutzer.id = ?1
-            ",
-                )
-                .map_err(|e| format!("Fehler beim Auslesen der Benutzerdaten 4"))?;
+            // Grundbücher
+            let verfuegbare_grundbuecher = crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(
+                &benutzer_info,
+            ).unwrap_or_default();
 
-            let benutzer = stmt
-                .query_map(rusqlite::params![benutzer_info.id], |row| {
-                    Ok((
-                        row.get::<usize, String>(0)?,
-                        row.get::<usize, String>(1)?,
-                        row.get::<usize, String>(2)?,
-                        row.get::<usize, Option<String>>(3)?,
-                        row.get::<usize, Option<String>>(4)?,
-                    ))
-                })
-                .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?
-                .collect::<Vec<_>>();
+            data.data.insert(
+                "blaetter".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "land".to_string(),
+                        "amtsgericht".to_string(),
+                        "bezirk".to_string(),
+                        "blatt".to_string(),
+                    ],
+                    daten: verfuegbare_grundbuecher
+                        .into_iter()
+                        .map(|(l, a, g, b)| (
+                            format!("{l}/{a}/{g}/{b}"),
+                            vec![l, a, g, b],
+                        ))
+                        .collect(),
+                },
+            );
 
+            // Einstellungen
             data.data.insert(
                 "meine-kontodaten".to_string(),
                 KontoTabelle {
                     spalten: vec![
-                        "name".to_string(),
-                        "email".to_string(),
-                        "rechte".to_string(),
-                        "publickeys.fingerprint".to_string(),
-                        "publickeys.pubkey".to_string(),
+                        "id".to_string(),
+                        "global".to_string(),
+                        "einstellung".to_string(),
+                        "wert".to_string(),
                     ],
-                    daten: benutzer
-                        .into_iter()
-                        .filter_map(|row| {
-                            let row = row.ok()?;
-                            Some((
-                                row.1.clone(),
-                                vec![
-                                    row.0.clone(),
-                                    row.1.clone(),
-                                    row.2.clone(),
-                                    row.3.clone().unwrap_or_default(),
-                                    row.4.clone().unwrap_or_default(),
-                                ],
-                            ))
-                        })
-                        .collect(),
+                    daten: {
+                        let mut d = BTreeMap::new();
+                        for (id, (k, v)) in get_einstellungen_fuer_benutzer(MountPoint::Local, &benutzer_info)?.into_iter() {
+                            d.insert(id.to_string(), vec![
+                                "false".to_string(),
+                                k.to_string(),
+                                v.to_string(),
+                            ]);
+                        }
+                        d
+                    },
                 },
             );
         }
         "gast" => {
 
-            // Extra Kontodaten
-            let publickey = match crate::db::get_active_publickey_for_benutzer(&benutzer_info) {
-                Ok(o) => o,
-                Err(_) => None,
-            };
-
-            data.data.insert(
-                "kontodaten-extra".to_string(),
-                KontoTabelle {
-                    spalten: vec![
-                        "wert".to_string(),
-                    ],
-                    daten: {
-                        let mut b = BTreeMap::new();
-                        b.insert("konto.publickey".to_string(), vec![publickey.unwrap_or_default()]);
-                        b
-                    }
-                }
-            );
-
+            // Grundbücher
             let verfuegbare_grundbuecher = crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(
                 &benutzer_info,
             ).unwrap_or_default();

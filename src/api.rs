@@ -676,10 +676,10 @@ pub mod konto {
             text: e,
         })?;
 
-        if benutzer.rechte != "admin" {
+        if benutzer.rechte != "admin" && benutzer.rechte != "bearbeiter" {
             return Err(KontoGeneriereSchluesselPostResponseError {
                 code: 500,
-                text: "Cannot generate public key pair: Invalid authentication.".to_string(),
+                text: format!("Cannot generate public key pair: Invalid authentication: {}", benutzer.rechte),
             });
         }
 
@@ -799,7 +799,7 @@ pub mod konto {
                 let pubkey = data.daten.get(1)
                 .ok_or(KontoJsonPostResponseError {
                     code: 500,
-                    text: "Benutzer PubKey ändern: keine PubKey".to_string(),
+                    text: "Benutzer PubKey ändern: kein PubKey".to_string(),
                 })?;
 
                 crate::api::write_to_root_db(DbChangeOp::BenutzerAendernPubkey { 
@@ -916,14 +916,35 @@ pub mod konto {
                         })?;
                 }
             },
-            ("gast", "blaetter-als-zip") => {
+            ("bearbeiter", "benutzer-bearbeite-pubkey") => {
 
+                let pubkey = data.daten.get(1)
+                .ok_or(KontoJsonPostResponseError {
+                    code: 500,
+                    text: "Benutzer PubKey ändern: kein PubKey".to_string(),
+                })?;
+
+                crate::api::write_to_root_db(DbChangeOp::BenutzerAendernPubkey { 
+                    id: benutzer.email.clone(), 
+                    neuer_pubkey: pubkey.clone(),
+                }, &app_state)
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError {
+                        code: 500,
+                        text: e,
+                    })?;
             },
-            ("gast", "abo-neu") => {
-
+            ("gast", "blaetter-als-zip") |
+            ("bearbeiter", "blaetter-als-zip") => {
+                // TODO
             },
-            ("gast", "abo-loeschen") => {
-
+            ("gast", "abo-neu") |
+            ("bearbeiter", "abo-neu") => {
+                // TODO
+            },
+            ("gast", "abo-loeschen") |
+            ("bearbeiter", "abo-loeschen") => {
+                // TODO
             },
             _ => {
                 return Err(KontoJsonPostResponseError {
