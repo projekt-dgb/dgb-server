@@ -12,6 +12,7 @@ cargo run --release -- start && open 127.0.0.1:8080
 
 ```sh
 docker build -t grundbuch/dgb-server:latest .
+docker run -p 127.0.0.1:80:8080 grundbuch/dgb-server:latest
 docker login
 docker push grundbuch/dgb-server:latest
 ```
