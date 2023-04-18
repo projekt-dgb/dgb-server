@@ -34,14 +34,12 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag ${{ secrets.DOCKER_USERNAME }}/dgb-server:latest
-  push:
-    needs: [setup, build]
-    runs-on: ubuntu-latest
-    if: needs.setup.outputs.DOING_RELEASE == '1' || github.event.inputs.release != ''
-    steps:
-      - name: docker login
-        run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PAT }}
-      - name: tag latest image
-        run: docker tag ${{ secrets.DOCKER_USERNAME }}/dgb-server:latest ${{ secrets.DOCKER_USERNAME }}/dgb-server:${{ needs.setup.outputs.VERSION }}
-      - name: docker push
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/dgb-server:${{ needs.setup.outputs.VERSION }}
+    - name: docker login
+      if: needs.setup.outputs.DOING_RELEASE == '1' || github.event.inputs.release != ''
+      run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PAT }}
+    - name: tag latest image
+      if: needs.setup.outputs.DOING_RELEASE == '1' || github.event.inputs.release != ''
+      run: docker tag ${{ secrets.DOCKER_USERNAME }}/dgb-server:latest ${{ secrets.DOCKER_USERNAME }}/dgb-server:${{ needs.setup.outputs.VERSION }}
+    - name: docker push
+      if: needs.setup.outputs.DOING_RELEASE == '1' || github.event.inputs.release != ''
+      run: docker push ${{ secrets.DOCKER_USERNAME }}/dgb-server:${{ needs.setup.outputs.VERSION }}
