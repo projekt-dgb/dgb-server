@@ -1039,6 +1039,7 @@ dependencies = [
  "chrono",
  "clap",
  "comrak",
+ "gbx",
  "git2",
  "hyphenation",
  "k8s-openapi",
@@ -1561,6 +1562,16 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
+]
+
+[[package]]
+name = "gbx"
+version = "1.0.0"
+source = "git+https://github.com/projekt-dgb/gbx?rev=c624d311f9a0702e07f4aebe97d8bad141803c8f#c624d311f9a0702e07f4aebe97d8bad141803c8f"
+dependencies = [
+ "lazy_static",
+ "regex",
+ "serde",
 ]
 
 [[package]]

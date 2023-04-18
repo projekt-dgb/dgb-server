@@ -14,48 +14,54 @@
             </ul>
         </nav>
 
-        <div class="deco-rect"></div>
-        
-        <h1>Anmelden</h1>
-        
-        <form id="formdata" onsubmit="onLoginSubmit(event)" method="post">
-            <div>
-            <label for="email">E-Mail</label><br/>
-            <input id='email' autofocus='true' name='email' type="email" />
+        <div class="body-internal">
+            <div class="login-deco-rect">
+                <!-- SVG -->
             </div>
-            <div>
-            <label for="passwort">Passwort</label><br/>
-            <input id='passwort' name='passwort' type="password" />
+            <div class="body-internal-login-form">
+                <h1>Anmelden</h1>
+            
+                <form id="formdata" onsubmit="onLoginSubmit(event)" method="post">
+                    <div>
+                    <label for="email">E-Mail</label><br/>
+                    <input id='email' autofocus='true' name='email' type="email" />
+                    </div>
+                    <div>
+                    <label for="passwort">Passwort</label><br/>
+                    <input id='passwort' name='passwort' type="password" />
+                    </div>
+                    <br/>
+                    <button type="submit" class="block-btn"><p>Anmelden</p></button>
+                </form>
             </div>
-            <br/>
-            <button type="submit" class="block-btn"><p>Anmelden</p></button>
-        </form>
+        </div>
+
         <script>
 
-        function onLoginSubmit(event) {
+            function onLoginSubmit(event) {
 
-            event.preventDefault();
-            var email = document.getElementById("email").value;
-            var passwort = document.getElementById("passwort").value;
+                event.preventDefault();
+                var email = document.getElementById("email").value;
+                var passwort = document.getElementById("passwort").value;
 
-            var http = new XMLHttpRequest();
-            http.open('POST', '/login', true);
-            http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-            http.onreadystatechange = function() {
-                if (http.readyState == 4 && http.status == 200) {
-                    document.getElementById("formdata").reset();
-                    var object = JSON.parse(http.responseText);
-                    if (object.status == "ok") {
-                        document.cookie = "Authentication=" + (object.token || "") + "; path=/";
-                        window.location.href = '/konto';
-                    } else if (object.status == "error") {
-                        console.error("" + object.code + ": " + object.text);
+                var http = new XMLHttpRequest();
+                http.open('POST', '/login', true);
+                http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+                http.onreadystatechange = function() {
+                    if (http.readyState == 4 && http.status == 200) {
+                        document.getElementById("formdata").reset();
+                        var object = JSON.parse(http.responseText);
+                        if (object.status == "ok") {
+                            document.cookie = "Authentication=" + (object.token || "") + "; path=/";
+                            window.location.href = '/konto';
+                        } else if (object.status == "error") {
+                            console.error("" + object.code + ": " + object.text);
+                        }
                     }
                 }
+                http.send('email=' + email + '&passwort=' + passwort);
+                return false;
             }
-            http.send('email=' + email + '&passwort=' + passwort);
-            return false;
-        }
 
         </script>
     </body>

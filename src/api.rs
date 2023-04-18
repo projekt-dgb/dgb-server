@@ -108,24 +108,29 @@ pub(crate) async fn write_to_root_db(
 
 /// HTML für `/` und `/api` Seite
 pub mod index {
+    use crate::AppState;
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
-    use crate::AppState;
 
     // Startseite
     #[get("/")]
     async fn status(_: HttpRequest) -> impl Responder {
-        let css = include_str!("../web/style.css");
+        let css = crate::get_css();
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
-            .body(include_str!("../web/index.html").replace("<!-- CSS -->", &css))
+            .body(
+                include_str!("../web/index.html")
+                    .replace("<!-- CSS -->", &css)
+                    .replace("<!-- SVG -->", include_str!("../web/foam.svg"))
+                    .replace("<!-- SVG_2 -->", include_str!("../web/foam3.svg")),
+            )
     }
 
     // Zugriff anfragen
     #[get("/zugriff")]
     async fn zugriff(_: HttpRequest) -> impl Responder {
-        let css = include_str!("../web/style.css");
+        let css = crate::get_css();
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
@@ -250,14 +255,11 @@ pub mod index {
     // Login-Seite
     #[post("/zugriff")]
     pub async fn zugriff_post(
-        app_state: web::Data<AppState>, 
-        json: web::Json<ZugriffJsonPost>, 
-        _: HttpRequest
+        app_state: web::Data<AppState>,
+        json: web::Json<ZugriffJsonPost>,
+        _: HttpRequest,
     ) -> impl Responder {
-        let response = zugriff_post_inner(
-            &*app_state, 
-            &*json
-        ).await;
+        let response = zugriff_post_inner(&*app_state, &*json).await;
 
         HttpResponse::Ok()
             .content_type("application/json")
@@ -275,7 +277,10 @@ pub mod index {
             })
     }
 
-    async fn zugriff_post_inner(app_state: &AppState, json: &ZugriffJsonPost) -> Result<ZugriffJsonResponseOk, String> {
+    async fn zugriff_post_inner(
+        app_state: &AppState,
+        json: &ZugriffJsonPost,
+    ) -> Result<ZugriffJsonResponseOk, String> {
         use self::ZugriffJsonPost::*;
 
         match json {
@@ -356,26 +361,13 @@ pub mod index {
         }
     }
 
-    #[get("/konto.js")]
-    async fn konto_js(_: HttpRequest) -> impl Responder {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("web")
-            .join("konto.js");
-
-        let s = std::fs::read_to_string(path).unwrap_or_default();
-
-        HttpResponse::Ok().content_type("text/javascript").body(s)
-    }
-
     // Seite mit API-Dokumentation
     #[get("/api")]
     async fn api(req: HttpRequest) -> impl Responder {
         use comrak::{markdown_to_html, ComrakOptions};
         let html = markdown_to_html(include_str!("../API.md"), &ComrakOptions::default());
-        let css = concat!(
-            include_str!("../web/github-markdown-light.css"),
-            include_str!("../web/style.css")
-        );
+        let mut css = include_str!("../web/github-markdown-light.css").to_string();
+        css.push_str(&crate::get_css());
         let body = format!(
             "
             <!DOCTYPE html>
@@ -415,11 +407,15 @@ pub mod login {
     // Login-Seite
     #[get("/login")]
     async fn login_get(_: HttpRequest) -> impl Responder {
-        let css = include_str!("../web/style.css");
+        let css = crate::get_css();
         let css = format!("<style type='text/css'>{css}</style>");
         HttpResponse::Ok()
             .content_type("text/html; charset=utf-8")
-            .body(include_str!("../web/login.html").replace("<!-- CSS -->", &css))
+            .body(
+                include_str!("../web/login.html")
+                    .replace("<!-- CSS -->", &css)
+                    .replace("<!-- SVG -->", include_str!("../web/foam4.svg")),
+            )
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -518,8 +514,12 @@ pub mod konto {
     use actix_web::{get, post, web, HttpRequest, HttpResponse, Responder};
     use serde_derive::{Deserialize, Serialize};
 
-    use crate::{db::{KontoData, GpgKeyPair, KontoDataResult}, BezirkeLoeschenArgs, BenutzerNeuArgsJson, AppState, BenutzerLoeschenArgs, BezirkeNeuArgs, api::login::LoginResponse};
-    
+    use crate::{
+        api::login::LoginResponse,
+        db::{GpgKeyPair, KontoData, KontoDataResult},
+        AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson, BezirkeLoeschenArgs, BezirkeNeuArgs,
+    };
+
     #[derive(Deserialize)]
     struct ZugriffId {
         id: Option<String>,
@@ -538,19 +538,18 @@ pub mod konto {
                             .append_header(("Location", "/login"))
                             .finish();
                     }
-                }; 
+                };
                 */
 
-                let html = include_str!("../web/konto-login.html")
-                .replace(
+                let html = include_str!("../web/konto-login.html").replace(
                     "<!-- CSS -->",
-                    &format!("<style>{}</style>", include_str!("../web/style.css")),
+                    &format!("<style>{}</style>", crate::get_css()),
                 );
 
                 HttpResponse::Ok()
-                .content_type("text/html; charset=utf-8")
-                .body(html)
-            },
+                    .content_type("text/html; charset=utf-8")
+                    .body(html)
+            }
             None => {
                 let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
                     Ok(o) => o,
@@ -571,7 +570,7 @@ pub mod konto {
                 let html = include_str!("../web/konto.html")
                     .replace(
                         "<!-- CSS -->",
-                        &format!("<style>{}</style>", include_str!("../web/style.css")),
+                        &format!("<style>{}</style>", crate::get_css()),
                     )
                     .replace(
                         "data-konto-daten=\"{}\"",
@@ -580,11 +579,12 @@ pub mod konto {
                     .replace(
                         "data-token-id=\"\"",
                         &format!("data-token-id=\"{}\"", token),
-                    );
+                    )
+                    .replace("// KONTO_JS_SCRIPT", include_str!("../web/konto.js"));
 
                 HttpResponse::Ok()
-                .content_type("text/html; charset=utf-8")
-                .body(html)
+                    .content_type("text/html; charset=utf-8")
+                    .body(html)
             }
         }
     }
@@ -650,120 +650,122 @@ pub mod konto {
     struct KontoGeneriereSchluessel {
         auth: String,
         email: String,
-        name: String,    
+        name: String,
     }
 
     #[post("/konto-generiere-schluessel")]
-    async fn konto_generiere_schluessel(_: HttpRequest, state: web::Data<AppState>, data: web::Json<KontoGeneriereSchluessel>) -> impl Responder {
-        let result =  match konto_generiere_schluessel_inner(&*state, &*data).await {
+    async fn konto_generiere_schluessel(
+        _: HttpRequest,
+        state: web::Data<AppState>,
+        data: web::Json<KontoGeneriereSchluessel>,
+    ) -> impl Responder {
+        let result = match konto_generiere_schluessel_inner(&*state, &*data).await {
             Ok(o) => KontoGeneriereSchluesselPostResponse::Ok(o),
             Err(e) => KontoGeneriereSchluesselPostResponse::Error(e),
         };
 
         HttpResponse::Ok()
-        .content_type("application/json")
-        .body(serde_json::to_string(&result).unwrap_or_default())
+            .content_type("application/json")
+            .body(serde_json::to_string(&result).unwrap_or_default())
     }
-    
+
     async fn konto_generiere_schluessel_inner(
-        app_state: &AppState, 
-        data: &KontoGeneriereSchluessel
+        app_state: &AppState,
+        data: &KontoGeneriereSchluessel,
     ) -> Result<GpgKeyPair, KontoGeneriereSchluesselPostResponseError> {
-    
         let benutzer = crate::db::get_user_from_token(&data.auth)
-        .map_err(|e| KontoGeneriereSchluesselPostResponseError {
-            code: 500,
-            text: e,
-        })?;
+            .map_err(|e| KontoGeneriereSchluesselPostResponseError { code: 500, text: e })?;
 
         if benutzer.rechte != "admin" && benutzer.rechte != "bearbeiter" {
             return Err(KontoGeneriereSchluesselPostResponseError {
                 code: 500,
-                text: format!("Cannot generate public key pair: Invalid authentication: {}", benutzer.rechte),
+                text: format!(
+                    "Cannot generate public key pair: Invalid authentication: {}",
+                    benutzer.rechte
+                ),
             });
         }
 
-        let pair = crate::db::create_gpg_key(&data.name, &data.email)
-            .map_err(|e| KontoGeneriereSchluesselPostResponseError {
+        let pair = crate::db::create_gpg_key(&data.name, &data.email).map_err(|e| {
+            KontoGeneriereSchluesselPostResponseError {
                 code: 500,
                 text: format!("Cannot generate public key pair: Unknown error."),
-            })?;
+            }
+        })?;
 
         Ok(pair)
     }
 
     #[post("/konto")]
-    async fn konto_post(_: HttpRequest, state: web::Data<AppState>, data: web::Json<KontoJsonPost>) -> impl Responder {
-        let result =  match konto_post_inner(&*state, &*data).await {
+    async fn konto_post(
+        _: HttpRequest,
+        state: web::Data<AppState>,
+        data: web::Json<KontoJsonPost>,
+    ) -> impl Responder {
+        let result = match konto_post_inner(&*state, &*data).await {
             Ok(o) => KontoJsonPostResponse::Ok(o),
             Err(e) => KontoJsonPostResponse::Error(e),
         };
 
         HttpResponse::Ok()
-        .content_type("application/json")
-        .body(serde_json::to_string(&result).unwrap_or_default())
+            .content_type("application/json")
+            .body(serde_json::to_string(&result).unwrap_or_default())
     }
 
-    async fn konto_post_inner(app_state: &AppState, data: &KontoJsonPost) -> Result<KontoData, KontoJsonPostResponseError> {
-
+    async fn konto_post_inner(
+        app_state: &AppState,
+        data: &KontoJsonPost,
+    ) -> Result<KontoData, KontoJsonPostResponseError> {
         use crate::api::commit::DbChangeOp;
         use crate::BezirkNeuArgs;
 
         let benutzer = crate::db::get_user_from_token(&data.auth)
-        .map_err(|e| KontoJsonPostResponseError {
-            code: 500,
-            text: e,
-        })?;
+            .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
 
         match (benutzer.rechte.as_str(), data.aktion.as_str()) {
             ("admin", "benutzer-neu") => {
-                let name = data.daten.get(0)
-                .ok_or(KontoJsonPostResponseError {
+                let name = data.daten.get(0).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer neu anlegen: kein Name in Daten vorhanden".to_string(),
                 })?;
-                let email = data.daten.get(1)
-                .ok_or(KontoJsonPostResponseError {
+                let email = data.daten.get(1).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer neu anlegen: keine E-Mail in Daten vorhanden".to_string(),
                 })?;
-                let passwort = data.daten.get(2)
-                .ok_or(KontoJsonPostResponseError {
+                let passwort = data.daten.get(2).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer neu anlegen: kein Passwort in Daten vorhanden".to_string(),
                 })?;
                 let rechte = "gast";
-                crate::api::write_to_root_db(DbChangeOp::BenutzerNeu(BenutzerNeuArgsJson {
-                    name: name.clone(),
-                    email: email.clone(),
-                    passwort: passwort.clone(),
-                    rechte: rechte.to_string(),
-                    schluessel: None,
-                }), &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
+                crate::api::write_to_root_db(
+                    DbChangeOp::BenutzerNeu(BenutzerNeuArgsJson {
+                        name: name.clone(),
+                        email: email.clone(),
+                        passwort: passwort.clone(),
+                        rechte: rechte.to_string(),
+                        schluessel: None,
+                    }),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
             ("admin", "benutzer-loeschen") => {
-                let email = data.daten.get(0)
-                .ok_or(KontoJsonPostResponseError {
+                let email = data.daten.get(0).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer löschen: keine E-Mail in Daten vorhanden".to_string(),
                 })?;
-                crate::api::write_to_root_db(DbChangeOp::BenutzerLoeschen(BenutzerLoeschenArgs {
-                    email: email.clone(),
-                }), &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
+                crate::api::write_to_root_db(
+                    DbChangeOp::BenutzerLoeschen(BenutzerLoeschenArgs {
+                        email: email.clone(),
+                    }),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
             ("admin", "benutzer-bearbeite-kontotyp") => {
-                let neuer_kontotyp = data.daten.get(0)
-                .ok_or(KontoJsonPostResponseError {
+                let neuer_kontotyp = data.daten.get(0).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer neu anlegen: kein Name in Daten vorhanden".to_string(),
                 })?;
@@ -778,103 +780,96 @@ pub mod konto {
 
                 let emails = data.daten.iter().skip(1).cloned().collect();
 
-                crate::api::write_to_root_db(DbChangeOp::BenutzerAendernRechte {
-                    neue_rechte: neuer_kontotyp.to_string(),
-                    ids: emails,
-                }, &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
+                crate::api::write_to_root_db(
+                    DbChangeOp::BenutzerAendernRechte {
+                        neue_rechte: neuer_kontotyp.to_string(),
+                        ids: emails,
+                    },
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
             ("admin", "benutzer-bearbeite-pubkey") => {
-
-                let email = data.daten.get(0)
-                .ok_or(KontoJsonPostResponseError {
+                let email = data.daten.get(0).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer PubKey ändern: keine E-Mail ID".to_string(),
                 })?;
 
-                let pubkey = data.daten.get(1)
-                .ok_or(KontoJsonPostResponseError {
+                let pubkey = data.daten.get(1).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer PubKey ändern: kein PubKey".to_string(),
                 })?;
 
-                crate::api::write_to_root_db(DbChangeOp::BenutzerAendernPubkey { 
-                    id: email.clone(), 
-                    neuer_pubkey: pubkey.clone(),
-                }, &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
+                crate::api::write_to_root_db(
+                    DbChangeOp::BenutzerAendernPubkey {
+                        id: email.clone(),
+                        neuer_pubkey: pubkey.clone(),
+                    },
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
             ("admin", "bezirk-neu") => {
                 let mut bezirke = Vec::new();
                 // daten =  CSV-Datei als Zellen (Land, Amtsgericht, Bezirk)
                 for (i, triple) in data.daten.chunks(3).enumerate() {
-                    let land = triple.get(0)
-                    .ok_or(KontoJsonPostResponseError {
+                    let land = triple.get(0).ok_or(KontoJsonPostResponseError {
                         code: 500,
                         text: format!("Bezirke neu anlegen: Fehler in Zeile {i}: Bundesland fehlt"),
                     })?;
-                    let amtsgericht = triple.get(1)
-                    .ok_or(KontoJsonPostResponseError {
+                    let amtsgericht = triple.get(1).ok_or(KontoJsonPostResponseError {
                         code: 500,
-                        text: format!("Bezirke neu anlegen: Fehler in Zeile {i}: Amtsgericht fehlt"),
+                        text: format!(
+                            "Bezirke neu anlegen: Fehler in Zeile {i}: Amtsgericht fehlt"
+                        ),
                     })?;
-                    let bezirk = triple.get(2)
-                    .ok_or(KontoJsonPostResponseError {
+                    let bezirk = triple.get(2).ok_or(KontoJsonPostResponseError {
                         code: 500,
-                        text: format!("Bezirke neu anlegen: Fehler in Zeile {i}: Grundbuchbezirk fehlt"),
+                        text: format!(
+                            "Bezirke neu anlegen: Fehler in Zeile {i}: Grundbuchbezirk fehlt"
+                        ),
                     })?;
                     bezirke.push(BezirkNeuArgs {
-                        land: land.clone(), 
-                        amtsgericht: amtsgericht.clone(), 
-                        bezirk: bezirk.clone()
+                        land: land.clone(),
+                        amtsgericht: amtsgericht.clone(),
+                        bezirk: bezirk.clone(),
                     });
                 }
 
-                crate::api::write_to_root_db(DbChangeOp::BezirkeNeu(BezirkeNeuArgs {
-                    bezirke: bezirke,
-                }), &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
+                crate::api::write_to_root_db(
+                    DbChangeOp::BezirkeNeu(BezirkeNeuArgs { bezirke: bezirke }),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
             ("admin", "bezirk-loeschen") => {
-                crate::api::write_to_root_db(DbChangeOp::BezirkeLoeschen(BezirkeLoeschenArgs {
-                    ids: data.daten.clone(),
-                }), &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
+                crate::api::write_to_root_db(
+                    DbChangeOp::BezirkeLoeschen(BezirkeLoeschenArgs {
+                        ids: data.daten.clone(),
+                    }),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
             ("admin", "zugriff-genehmigen") => {
-                crate::api::write_to_root_db(DbChangeOp::ZugriffGenehmigen {
-                    ids: data.daten.clone(),
-                    email: benutzer.email.clone(),
-                    datum: chrono::Utc::now().to_rfc3339(),
-                }, &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-                
-                let benutzer_grouped_by_email = crate::db::get_benutzer_grouped_by_zugriff(
-                    data.daten.clone()
-                ).map_err(|e| KontoJsonPostResponseError {
-                    code: 500,
-                    text: e,
-                })?;
+                crate::api::write_to_root_db(
+                    DbChangeOp::ZugriffGenehmigen {
+                        ids: data.daten.clone(),
+                        email: benutzer.email.clone(),
+                        datum: chrono::Utc::now().to_rfc3339(),
+                    },
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+
+                let benutzer_grouped_by_email =
+                    crate::db::get_benutzer_grouped_by_zugriff(data.daten.clone())
+                        .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
 
                 for (email, grundbuecher) in benutzer_grouped_by_email {
                     if let Err(e) = crate::email::send_zugriff_gewaehrt_email(
@@ -882,70 +877,62 @@ pub mod konto {
                         &grundbuecher.zugriff_id,
                         &grundbuecher.grundbuecher,
                     ) {
-                        return Err(KontoJsonPostResponseError {
-                            code: 500,
-                            text: e,
-                        });
+                        return Err(KontoJsonPostResponseError { code: 500, text: e });
                     }
                 }
-            },
+            }
             ("admin", "zugriff-ablehnen") => {
-                crate::api::write_to_root_db(DbChangeOp::ZugriffAblehnen {
-                    ids: data.daten.clone(),
-                    email: benutzer.email.clone(),
-                    datum: chrono::Utc::now().to_rfc3339(),
-                }, &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
+                crate::api::write_to_root_db(
+                    DbChangeOp::ZugriffAblehnen {
+                        ids: data.daten.clone(),
+                        email: benutzer.email.clone(),
+                        datum: chrono::Utc::now().to_rfc3339(),
+                    },
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
 
                 // sende_email(&benutzer.email, zugriff_abgelehnt)
-            },
+            }
             ("admin", "konfiguration-bearbeiten") => {
                 for pair in data.daten.chunks(2) {
-                    crate::api::write_to_root_db(DbChangeOp::BearbeiteEinstellung {
-                        id: pair[0].to_string(),
-                        neuer_wert: pair[1].to_string(),
-                    }, &app_state)
-                        .await
-                        .map_err(|e| KontoJsonPostResponseError {
-                            code: 500,
-                            text: e,
-                        })?;
+                    crate::api::write_to_root_db(
+                        DbChangeOp::BearbeiteEinstellung {
+                            id: pair[0].to_string(),
+                            neuer_wert: pair[1].to_string(),
+                        },
+                        &app_state,
+                    )
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
                 }
-            },
+            }
             ("bearbeiter", "benutzer-bearbeite-pubkey") => {
-
-                let pubkey = data.daten.get(1)
-                .ok_or(KontoJsonPostResponseError {
+                let pubkey = data.daten.get(1).ok_or(KontoJsonPostResponseError {
                     code: 500,
                     text: "Benutzer PubKey ändern: kein PubKey".to_string(),
                 })?;
 
-                crate::api::write_to_root_db(DbChangeOp::BenutzerAendernPubkey { 
-                    id: benutzer.email.clone(), 
-                    neuer_pubkey: pubkey.clone(),
-                }, &app_state)
-                    .await
-                    .map_err(|e| KontoJsonPostResponseError {
-                        code: 500,
-                        text: e,
-                    })?;
-            },
-            ("gast", "blaetter-als-zip") |
-            ("bearbeiter", "blaetter-als-zip") => {
+                crate::api::write_to_root_db(
+                    DbChangeOp::BenutzerAendernPubkey {
+                        id: benutzer.email.clone(),
+                        neuer_pubkey: pubkey.clone(),
+                    },
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            }
+            ("gast", "blaetter-als-zip") | ("bearbeiter", "blaetter-als-zip") => {
                 // TODO
-            },
-            ("gast", "abo-neu") |
-            ("bearbeiter", "abo-neu") => {
+            }
+            ("gast", "abo-neu") | ("bearbeiter", "abo-neu") => {
                 // TODO
-            },
-            ("gast", "abo-loeschen") |
-            ("bearbeiter", "abo-loeschen") => {
+            }
+            ("gast", "abo-loeschen") | ("bearbeiter", "abo-loeschen") => {
                 // TODO
-            },
+            }
             _ => {
                 return Err(KontoJsonPostResponseError {
                     code: 500,
@@ -954,9 +941,8 @@ pub mod konto {
             }
         }
 
-        let konto_data = 
-            crate::db::get_konto_data(&benutzer)
-            .unwrap_or(KontoDataResult::KeinPasswort);
+        let konto_data =
+            crate::db::get_konto_data(&benutzer).unwrap_or(KontoDataResult::KeinPasswort);
 
         let konto_data = match konto_data {
             KontoDataResult::Aktiviert(a) => a,
@@ -967,60 +953,61 @@ pub mod konto {
     }
 
     #[post("/konto-neu")]
-    async fn konto_post_neu(_: HttpRequest, state: web::Data<AppState>, data: web::Json<KontoNeuJsonPost>) -> impl Responder {        
-        let result =  match konto_post_neu_inner(&*state, &*data).await {
+    async fn konto_post_neu(
+        _: HttpRequest,
+        state: web::Data<AppState>,
+        data: web::Json<KontoNeuJsonPost>,
+    ) -> impl Responder {
+        let result = match konto_post_neu_inner(&*state, &*data).await {
             Ok(s) => KontoNeuPostResponse::Ok(KontoNeuJsonResponseOk { token: s }),
             Err(e) => KontoNeuPostResponse::Error(e),
         };
 
         HttpResponse::Ok()
-        .content_type("application/json")
-        .body(serde_json::to_string(&result).unwrap_or_default())
+            .content_type("application/json")
+            .body(serde_json::to_string(&result).unwrap_or_default())
     }
 
-    async fn konto_post_neu_inner(app_state: &AppState, data: &KontoNeuJsonPost) -> Result<String, KontoJsonPostResponseError> {
-        
+    async fn konto_post_neu_inner(
+        app_state: &AppState,
+        data: &KontoNeuJsonPost,
+    ) -> Result<String, KontoJsonPostResponseError> {
         use crate::api::commit::DbChangeOp;
 
         let benutzer_exists = crate::db::zugriff_benutzer_exists(&data.zugriff)
-        .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
 
         if benutzer_exists {
-            return Err(KontoJsonPostResponseError { 
-                code: 500, 
+            return Err(KontoJsonPostResponseError {
+                code: 500,
                 text: format!("Benutzer existiert bereits"),
             });
         }
 
-        let zugriff = crate::db::get_benutzer_grouped_by_zugriff(vec![
-            data.zugriff.clone(),
-        ]).map_err(|e| { KontoJsonPostResponseError { code: 500, text: e } })?;
+        let zugriff = crate::db::get_benutzer_grouped_by_zugriff(vec![data.zugriff.clone()])
+            .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
 
-        let (email, benutzer) = zugriff
-            .iter()
-            .next()
-            .ok_or(KontoJsonPostResponseError { code: 500, text: format!("Ungültige Zugriff-ID") })?;
+        let (email, benutzer) = zugriff.iter().next().ok_or(KontoJsonPostResponseError {
+            code: 500,
+            text: format!("Ungültige Zugriff-ID"),
+        })?;
 
-        crate::api::write_to_root_db(DbChangeOp::PasswortAendern {
-            email: email.clone(),
-            passwort: data.passwort.clone(),
-        }, &app_state)
-            .await
-            .map_err(|e| KontoJsonPostResponseError {
-                code: 500,
-                text: e,
-            })?;
-        
-        match crate::api::login::login_json(email, &data.passwort, app_state).await {
-            LoginResponse::Ok(o) => {
-                Ok(o.token)
+        crate::api::write_to_root_db(
+            DbChangeOp::PasswortAendern {
+                email: email.clone(),
+                passwort: data.passwort.clone(),
             },
-            LoginResponse::Error(e) => {
-                Err(KontoJsonPostResponseError {
-                    code: e.code,
-                    text: e.text,
-                })
-            }
+            &app_state,
+        )
+        .await
+        .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+
+        match crate::api::login::login_json(email, &data.passwort, app_state).await {
+            LoginResponse::Ok(o) => Ok(o.token),
+            LoginResponse::Error(e) => Err(KontoJsonPostResponseError {
+                code: e.code,
+                text: e.text,
+            }),
         }
     }
 }
@@ -1040,13 +1027,13 @@ pub mod commit {
         pull::PullResponse,
         upload::{commit_changes, sync_changes_to_disk, verify_signature, UploadChangeset},
     };
+    use crate::api::index::ZugriffTyp;
     use crate::models::{get_data_dir, get_db_path, MountPoint};
     use crate::{
-        AboLoeschenArgs, AboNeuArgs, AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson,
-        BezirkLoeschenArgs, BezirkNeuArgs, BenutzerAendernArgs, BezirkeNeuArgs,
-        BezirkeLoeschenArgs,
+        AboLoeschenArgs, AboNeuArgs, AppState, BenutzerAendernArgs, BenutzerLoeschenArgs,
+        BenutzerNeuArgsJson, BezirkLoeschenArgs, BezirkNeuArgs, BezirkeLoeschenArgs,
+        BezirkeNeuArgs,
     };
-    use crate::api::index::ZugriffTyp;
     use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
     use chrono::{DateTime, Utc};
     use rusqlite::Connection;
@@ -1189,25 +1176,23 @@ pub mod commit {
         }
 
         let conn = Connection::open(&get_db_path(MountPoint::Local))
-        .map_err(|e| response_err(500, format!("{e}")))?;
-        
+            .map_err(|e| response_err(500, format!("{e}")))?;
+
         let mut stmt = conn.prepare(
             "INSERT INTO grundbuecher (land, amtsgericht, bezirk, blatt) VALUES (?1, ?2, ?3, ?4)"
         ).map_err(|e| response_err(500, format!("{e}")))?;
-        
-        let gemarkungsbezirke = crate::db::get_gemarkungen()
-            .unwrap_or_default();
+
+        let gemarkungsbezirke = crate::db::get_gemarkungen().unwrap_or_default();
 
         for neu in upload_changeset.data.neu.iter() {
-            
             let land = gemarkungsbezirke
-            .iter()
-            .filter(|(_, ag, bez)| {
-                *ag == neu.analysiert.titelblatt.amtsgericht &&
-                *bez == neu.analysiert.titelblatt.grundbuch_von
-            })
-            .map(|(l, _, _)| l)
-            .next();
+                .iter()
+                .filter(|(_, ag, bez)| {
+                    *ag == neu.analysiert.titelblatt.amtsgericht
+                        && *bez == neu.analysiert.titelblatt.grundbuch_von
+                })
+                .map(|(l, _, _)| l)
+                .next();
 
             let land = match land {
                 Some(s) => s,
@@ -1233,11 +1218,11 @@ pub mod commit {
     pub(crate) enum DbChangeOp {
         BenutzerNeu(BenutzerNeuArgsJson),
         BenutzerAendernRechte {
-            ids: Vec<String>, 
+            ids: Vec<String>,
             neue_rechte: String,
         },
         BenutzerAendernPubkey {
-            id: String, 
+            id: String,
             neuer_pubkey: String,
         },
         BenutzerLoeschen(BenutzerLoeschenArgs),
@@ -1281,9 +1266,9 @@ pub mod commit {
             gueltig_bis: DateTime<Utc>,
         },
         BearbeiteEinstellung {
-            id: String, 
+            id: String,
             neuer_wert: String,
-        }
+        },
     }
 
     #[post("/get-db")]
@@ -1330,18 +1315,12 @@ pub mod commit {
         };
 
         match change_op {
-            DbChangeOp::BearbeiteEinstellung {
-                id, neuer_wert,
-            } => crate::db::bearbeite_einstellung(
-                mount_point_write, 
-                id, 
-                neuer_wert
-            ),
-            DbChangeOp::PasswortAendern { passwort, email } => crate::db::passwort_aendern(
-                mount_point_write,
-                &email,
-                &passwort,
-            ),
+            DbChangeOp::BearbeiteEinstellung { id, neuer_wert } => {
+                crate::db::bearbeite_einstellung(mount_point_write, id, neuer_wert)
+            }
+            DbChangeOp::PasswortAendern { passwort, email } => {
+                crate::db::passwort_aendern(mount_point_write, &email, &passwort)
+            }
             DbChangeOp::BenutzerNeu(un) => crate::db::create_user(
                 mount_point_write,
                 &un.name,
@@ -1350,26 +1329,15 @@ pub mod commit {
                 &un.rechte,
                 un.schluessel.clone(),
             ),
-            DbChangeOp::BenutzerAendernRechte { 
-                ids,
-                neue_rechte,
-            } => crate::db::bearbeite_benutzer_rechte(
-                mount_point_write,
-                ids,
-                neue_rechte
-            ),
-            DbChangeOp::BenutzerAendernPubkey {
-                id, 
-                neuer_pubkey,
-            } => crate::db::bearbeite_benutzer_pubkey(
-                mount_point_write, 
-                id, 
-                neuer_pubkey,
-            ),
-            DbChangeOp::BezirkeLoeschen(b) => crate::db::bezirke_loeschen(
-                mount_point_write,
-                b.ids.as_ref(),
-            ),
+            DbChangeOp::BenutzerAendernRechte { ids, neue_rechte } => {
+                crate::db::bearbeite_benutzer_rechte(mount_point_write, ids, neue_rechte)
+            }
+            DbChangeOp::BenutzerAendernPubkey { id, neuer_pubkey } => {
+                crate::db::bearbeite_benutzer_pubkey(mount_point_write, id, neuer_pubkey)
+            }
+            DbChangeOp::BezirkeLoeschen(b) => {
+                crate::db::bezirke_loeschen(mount_point_write, b.ids.as_ref())
+            }
             DbChangeOp::BenutzerLoeschen(ul) => {
                 crate::db::delete_user(mount_point_write, &ul.email)
             }
@@ -1379,10 +1347,9 @@ pub mod commit {
                 &bn.amtsgericht,
                 &bn.bezirk,
             ),
-            DbChangeOp::BezirkeNeu(b) => crate::db::bezirke_einfuegen(
-                mount_point_write,
-                &b.bezirke,
-            ),
+            DbChangeOp::BezirkeNeu(b) => {
+                crate::db::bezirke_einfuegen(mount_point_write, &b.bezirke)
+            }
             DbChangeOp::BezirkLoeschen(bl) => crate::db::delete_gemarkung(
                 mount_point_write,
                 &bl.land,
@@ -1429,7 +1396,7 @@ pub mod commit {
             ),
             DbChangeOp::ZugriffGenehmigen { ids, email, datum } => {
                 crate::db::zugriff_genehmigen(mount_point_write, ids, email, datum)
-            },
+            }
             DbChangeOp::ZugriffAblehnen { ids, email, datum } => {
                 crate::db::zugriff_ablehnen(mount_point_write, ids, email, datum)
             }
@@ -1466,9 +1433,7 @@ pub mod commit {
 
         match db_change_inner(change_op, app_state) {
             Ok(()) => Ok(response_ok()),
-            Err(e) => {
-                Err(response_err(500, e))
-            },
+            Err(e) => Err(response_err(500, e)),
         }
     }
 }
@@ -1800,7 +1765,7 @@ pub mod upload {
         }
 
         no_sig.push_str(&format!("Hash:         {}\r\n", signatur.hash));
-        no_sig.push_str(&format!("Schlüssel-ID: {fingerprint}\r\n"));
+        no_sig.push_str(&format!("Schluessel-ID: {fingerprint}\r\n"));
         no_sig.push_str("\r\n");
 
         no_sig.push_str("-----BEGIN PGP SIGNATURE-----\r\n");
@@ -1815,6 +1780,12 @@ pub mod upload {
         folder_path: &PathBuf,
     ) -> Result<(), HttpResponse> {
         let gemarkungen = crate::db::get_gemarkungen().unwrap_or_default();
+
+        println!(
+            "got {} new {} changed files",
+            upload_changeset.data.neu.len(),
+            upload_changeset.data.geaendert.len()
+        );
 
         for neu in upload_changeset.data.neu.iter() {
             let amtsgericht = &neu.analysiert.titelblatt.amtsgericht;
@@ -1837,6 +1808,7 @@ pub mod upload {
                 .join(grundbuch);
 
             let _ = std::fs::create_dir_all(&target_folder);
+            println!("writing to {}", target_path.display());
             let _ = std::fs::write(target_path, target_json.as_bytes());
         }
 
@@ -1861,6 +1833,7 @@ pub mod upload {
                 .join(grundbuch);
 
             let _ = std::fs::create_dir_all(&target_folder);
+            println!("(changed)writing to {}", target_path.display());
             let _ = std::fs::write(target_path, target_json.as_bytes());
         }
 
@@ -2027,20 +2000,13 @@ pub mod upload {
             let webhook_abos = crate::db::get_webhook_abos(&blatt).map_err(|e| format!("{e}"))?;
 
             for abo_info in webhook_abos {
-                let _ = crate::email::send_change_webhook(
-                    &abo_info,
-                    &commit_id,
-                )
-                .await;
+                let _ = crate::email::send_change_webhook(&abo_info, &commit_id).await;
             }
 
             let email_abos = crate::db::get_email_abos(&blatt).map_err(|e| format!("{e}"))?;
 
             for abo_info in email_abos {
-                let _ = crate::email::send_change_email(
-                    &abo_info,
-                    &commit_id,
-                );
+                let _ = crate::email::send_change_email(&abo_info, &commit_id);
             }
         }
 
@@ -2074,29 +2040,29 @@ pub mod download {
     }
 
     #[get("/download/client/{platform}")]
-    async fn download_client(
-        path: web::Path<String>,
-    ) -> impl Responder {
-
+    async fn download_client(path: web::Path<String>) -> impl Responder {
         let links = crate::db::get_globale_einstellungen(MountPoint::Local).unwrap_or_default();
-        let windows = links.iter()
+        let windows = links
+            .iter()
             .filter(|(id, (k, v))| k == "download.release.url.windows")
             .map(|(id, (k, v))| v.clone())
             .next()
             .unwrap_or_default();
-        
-        let linux = links.iter()
-        .filter(|(id, (k, v))| k == "download.release.url.linux")
-        .map(|(id, (k, v))| v.clone())
-        .next()
-        .unwrap_or_default();
-        
-        let mac = links.iter()
-        .filter(|(id, (k, v))| k == "download.release.url.mac")
-        .map(|(id, (k, v))| v.clone())
-        .next()
-        .unwrap_or_default();
-        
+
+        let linux = links
+            .iter()
+            .filter(|(id, (k, v))| k == "download.release.url.linux")
+            .map(|(id, (k, v))| v.clone())
+            .next()
+            .unwrap_or_default();
+
+        let mac = links
+            .iter()
+            .filter(|(id, (k, v))| k == "download.release.url.mac")
+            .map(|(id, (k, v))| v.clone())
+            .next()
+            .unwrap_or_default();
+
         let location = match path.as_str() {
             "windows" => windows,
             "linux" => linux,
@@ -2105,8 +2071,8 @@ pub mod download {
         };
 
         HttpResponse::TemporaryRedirect()
-        .append_header(("Location", location.as_str()))
-        .finish()
+            .append_header(("Location", location.as_str()))
+            .finish()
     }
 
     #[get("/download/gbx/{amtsgericht}/{grundbuch_von}/{blatt}")]
@@ -2256,10 +2222,7 @@ pub mod download {
     }
 
     #[get("/aenderung/pdf/{id}")]
-    async fn dowload_aenderung_pdf(
-        path: web::Path<String>,
-        req: HttpRequest,
-    ) -> impl Responder {
+    async fn dowload_aenderung_pdf(path: web::Path<String>, req: HttpRequest) -> impl Responder {
         let (_token, _) = match super::get_benutzer_from_httpauth(&req).await {
             Ok(o) => o,
             Err(e) => {
@@ -2275,7 +2238,7 @@ pub mod download {
     }
 
     fn generate_diff(id: &str) -> Vec<u8> {
-        use printpdf::{PdfDocument, Mm};
+        use printpdf::{Mm, PdfDocument};
         let titel = format!("Diff with ID {id}");
         let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Titelblatt");
         doc.save_to_bytes().unwrap_or_default()
@@ -2400,7 +2363,7 @@ pub mod suche {
                 let titelblatt = Titelblatt {
                     amtsgericht: ergebnis.amtsgericht.clone(),
                     grundbuch_von: ergebnis.grundbuch_von.clone(),
-                    blatt: StringOrUsize::S(ergebnis.blatt.clone()),
+                    blatt: ergebnis.blatt.clone(),
                 };
 
                 let abos = abos

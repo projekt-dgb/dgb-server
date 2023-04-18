@@ -46,7 +46,7 @@
 //! - `abo-loeschen`: Löscht das angegebene Abonnement.
 //!
 use crate::{db::GpgPublicKeyPair, models::MountPoint};
-use actix_web::{web::JsonConfig, App, HttpServer};
+use actix_web::{web::JsonConfig, App, HttpResponse, HttpServer};
 use clap::Parser;
 use models::get_data_dir;
 use serde_derive::{Deserialize, Serialize};
@@ -519,6 +519,60 @@ async fn load_app_state() -> AppState {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+enum JsonResponseErr {
+    #[serde(rename = "error")]
+    Err(JsonError),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct JsonError {
+    status: usize,
+    text: String,
+}
+
+impl std::fmt::Debug for JsonResponseErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(self).unwrap_or_default()
+        )
+    }
+}
+
+impl std::fmt::Display for JsonResponseErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            serde_json::to_string_pretty(self).unwrap_or_default()
+        )
+    }
+}
+
+impl std::error::Error for JsonResponseErr {}
+
+impl actix_web::ResponseError for JsonResponseErr {}
+
+pub fn get_css() -> String {
+    include_str!("../web/style.css")
+        .replace(
+            "BASE64_MONASANS_REGULAR",
+            &include_str!("../web/MonaSansRegular.base64.txt")
+                .lines()
+                .collect::<Vec<_>>()
+                .join(""),
+        )
+        .replace(
+            "BASE64_MONASANS_BLACK",
+            &include_str!("../web/MonaSansBlack.base64.txt")
+                .lines()
+                .collect::<Vec<_>>()
+                .join(""),
+        )
+}
+
 async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
     use std::path::Path;
 
@@ -557,6 +611,13 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
 
     HttpServer::new(move || {
         let json_cfg = JsonConfig::default()
+            .error_handler(|e, _| {
+                JsonResponseErr::Err(JsonError {
+                    status: 0,
+                    text: e.to_string(),
+                })
+                .into()
+            })
             .limit(usize::MAX)
             .content_type_required(false);
 
@@ -577,6 +638,13 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
 async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
     let json_cfg = || {
         JsonConfig::default()
+            .error_handler(|e, _| {
+                JsonResponseErr::Err(JsonError {
+                    status: 0,
+                    text: e.to_string(),
+                })
+                .into()
+            })
             .limit(usize::MAX)
             .content_type_required(false)
     };
@@ -601,7 +669,6 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
                 .service(crate::api::index::status)
                 .service(crate::api::index::zugriff)
                 .service(crate::api::index::zugriff_post)
-                .service(crate::api::index::konto_js)
                 .service(crate::api::index::api)
                 .service(crate::api::login::login_get)
                 .service(crate::api::login::login_post)
