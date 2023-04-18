@@ -1,6 +1,6 @@
 /target
 /data/certbot
 *.pdf
-*.txt
+out.txt
 /k8s
 .DS_Store
