@@ -1,0 +1,47 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "master" ]
+    tags: [ "[0-9]+.[0-9]+.[0-9]+*" ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+          description: 'Make release'
+jobs:
+
+  setup:
+    name: Set up
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.setup.outputs.VERSION }}
+      DOING_RELEASE: ${{ steps.setup.outputs.DOING_RELEASE }}
+    steps:
+      - name: Set up env vars
+        id: setup
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF/refs\/tags\//}
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          DOING_RELEASE=$(echo $VERSION | grep -c '^[0-9]\+\.[0-9]\+\.[0-9]\+\(-\([a-zA-Z]\+\)\?[0-9]*\)\?$' || true)
+          echo "DOING_RELEASE=${DOING_RELEASE}" >> $GITHUB_OUTPUT
+          echo $VERSION
+          echo $DOING_RELEASE
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile --tag ${{ secrets.DOCKER_USERNAME }}/dgb-server:latest
+  push:
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.DOING_RELEASE == '1' || github.event.inputs.release != ''
+    steps:
+      - name: docker login
+        run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PAT }}
+      - name: tag latest image
+        run: docker tag ${{ secrets.DOCKER_USERNAME }}/dgb-server:latest ${{ secrets.DOCKER_USERNAME }}/dgb-server:${{ needs.setup.outputs.VERSION }}
+      - name: docker push
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/dgb-server:${{ needs.setup.outputs.VERSION }}
