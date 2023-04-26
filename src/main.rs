@@ -726,54 +726,46 @@ async fn startup_http_server(
         Some(rustls_config)
     });
 
+    fn create_http_server<T>(app_state_clone: AppState) -> App<T> {
+        let cors = actix_cors::Cors::permissive()
+            .allow_any_origin()
+            .supports_credentials();
+
+        App::new()
+            .app_data(json_cfg())
+            .app_data(actix_web::web::Data::new(app_state_clone))
+            .wrap(actix_web::middleware::Compress::default())
+            .wrap(cors)
+            .service(crate::api::index::status)
+            .service(crate::api::index::zugriff)
+            .service(crate::api::index::zugriff_post)
+            .service(crate::api::index::api)
+            .service(crate::api::login::login_get)
+            .service(crate::api::login::login_post)
+            .service(crate::api::konto::konto_get)
+            .service(crate::api::konto::konto_post)
+            .service(crate::api::konto::konto_post_neu)
+            .service(crate::api::konto::konto_generiere_schluessel)
+            .service(crate::api::suche::suche)
+            .service(crate::api::download::download_gbx)
+            .service(crate::api::download::dowload_pdf)
+            .service(crate::api::download::dowload_aenderung_pdf)
+            .service(crate::api::download::download_client)
+            .service(crate::api::upload::upload)
+            .service(crate::api::abo::abo_neu)
+            .service(crate::api::abo::abo_loeschen)
+    }
+
     let app_state_clone = app_state.clone();
+
+    println!("dgb-server starte auf port 8080");
     let a = async move {
         let app_state_clone = app_state_clone.clone();
 
-        let s = HttpServer::new(move || {
-            let app_state_clone = app_state_clone.clone();
-
-            let cors = actix_cors::Cors::permissive()
-                .allow_any_origin()
-                .supports_credentials();
-
-            App::new()
-                .app_data(json_cfg())
-                .app_data(actix_web::web::Data::new(app_state_clone))
-                .wrap(actix_web::middleware::Compress::default())
-                .wrap(cors)
-                .service(crate::api::index::status)
-                .service(crate::api::index::zugriff)
-                .service(crate::api::index::zugriff_post)
-                .service(crate::api::index::api)
-                .service(crate::api::login::login_get)
-                .service(crate::api::login::login_post)
-                .service(crate::api::konto::konto_get)
-                .service(crate::api::konto::konto_post)
-                .service(crate::api::konto::konto_post_neu)
-                .service(crate::api::konto::konto_generiere_schluessel)
-                .service(crate::api::suche::suche)
-                .service(crate::api::download::download_gbx)
-                .service(crate::api::download::dowload_pdf)
-                .service(crate::api::download::dowload_aenderung_pdf)
-                .service(crate::api::download::download_client)
-                .service(crate::api::upload::upload)
-                .service(crate::api::abo::abo_neu)
-                .service(crate::api::abo::abo_loeschen)
-        });
-
-        if rustls_config.is_some() {
-            println!("dgb-server starte http server auf port 443");
-        } else {
-            println!("dgb-server starte http server auf port 8080");
-        }
-
-        let s = match rustls_config {
-            Some(config) => s.bind_rustls((ip, 443), config)?,
-            None => s.bind((ip, 8080))?,
-        };
-
-        s.run().await
+        HttpServer::new(create_http_server(app_state_clone))
+            .bind((ip, 8080))?
+            .run()
+            .await
     };
 
     let app_state_clone = app_state.clone();
@@ -795,8 +787,21 @@ async fn startup_http_server(
         .await
     };
 
-    match tokio::try_join!(a, b) {
-        Ok(((), ())) => Ok(()),
+    let app_state_clone = app_state.clone();
+    let c = async move {
+        let app_state_clone = app_state_clone.clone();
+        let s = HttpServer::new(create_http_server(app_state_clone));
+
+        if let Some(s) = rustls_config {
+            println!("dgb-server starte auf port 443");
+            s.bind_rustls((ip, 443), s)?.run().await
+        } else {
+            s.bind((ip, 8082))?.run().await
+        }
+    };
+
+    match tokio::try_join!(a, b, c) {
+        Ok(((), (), ())) => Ok(()),
         Err(e) => Err(e),
     }
 }

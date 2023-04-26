@@ -1,3 +1,40 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: acme-config
+type: Opaque
+stringData:
+  domains: "grundbuch-test.eu, test.grundbuch-test.eu"
+  email: "abc@test.com"
+  cache: /tmp/cache/acme_challenges
+  prod: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dgb-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dgb-server
+  template:
+    metadata:
+      labels:
+        app: dgb-server
+    spec:
+      containers:
+        - name: server
+          image: fschutt/dgb-server:1.0.3
+          imagePullPolicy: Always
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          ports:
+          - containerPort: 443
+          - containerPort: 8080
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,32 +70,6 @@ spec:
         - name: persistent-volume
           persistentVolumeClaim:
             claimName: persistent-volume
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: dgb-server
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: dgb-server
-  template:
-    metadata:
-      labels:
-        app: dgb-server
-    spec:
-      containers:
-        - name: server
-          image: fschutt/dgb-server:1.0.3
-          imagePullPolicy: Always
-          resources:
-            limits:
-              memory: "128Mi"
-              cpu: "100m"
-          ports:
-          - containerPort: 443
-          - containerPort: 8080
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
