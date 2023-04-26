@@ -7,10 +7,13 @@
 //! (neuer PublicKey, neuer Eintrag in der DB, etc.).
 
 use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::Secret;
 use kube::{
     api::{Api, ListParams},
     Client,
 };
+
+use crate::AcmeArgs;
 
 pub async fn is_running_in_k8s() -> bool {
     Client::try_default().await.is_ok()
@@ -29,6 +32,50 @@ pub struct K8sPeer {
     pub name: String,
     pub ip: String,
     pub namespace: String,
+}
+
+pub async fn k8s_get_acme_config() -> Result<Option<AcmeArgs>, kube::Error> {
+    let client = Client::try_default().await?;
+    let pods: Api<Secret> = Api::default_namespaced(client);
+    let lp = ListParams::default();
+    let list = pods.list(&lp).await;
+    Ok(pods
+        .list(&lp)
+        .await?
+        .iter()
+        .filter_map(|s| {
+            if s.metadata.name.as_deref().unwrap_or("") != "acme-config" {
+                println!("ignoring secret {:?}", s.metadata.name.as_deref());
+            }
+            let s = s.string_data.clone().unwrap_or_default();
+
+            let domains = s
+                .get("domains")
+                .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())
+                .unwrap_or_default();
+            let email = s
+                .get("email")
+                .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())
+                .unwrap_or_default();
+            let cache = s
+                .get("cache")
+                .map(|s| std::path::Path::new(s.trim()).to_path_buf());
+            let prod = s
+                .get("prod")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_default();
+
+            let args = AcmeArgs {
+                domains,
+                email,
+                cache,
+                prod,
+            };
+            println!("acme args {args:?}");
+
+            Some(args)
+        })
+        .next())
 }
 
 // https://stackoverflow.com/questions/57913132

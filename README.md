@@ -27,15 +27,14 @@ sowie eine `kubeconfig.yaml` Datei zum Anmelden im Kubernetes-Cluster.
 # K8s cluster ohne SSL erstellen
 export KUBECONFIG=./k8s/kubeconfig.yaml
 
-# cert-manager installieren
-kubectl apply -f ./k8s/1.yaml
-kubectl apply -f ./k8s/2.yaml
-kubectl apply -f ./k8s/3.yaml
-kubectl apply -f ./k8s/4.yaml
+kubectl apply -f ./k8s/deploy.yaml
 
-# Wichtigt: jetzt die IP-Addresse des Ingress in DNS-Einstellungen einstellen, bevor ACME-Challenge läuft
+# Jetzt die IP-Addresse des LoadBalancers in DNS-Einstellungen einstellen
 # "grundbuch-test.eu" -> "meine.website"
-kubectl apply -f ./k8s/5.yml
+kubectl apply -f ./k8s/secret.yml
+
+# Und das Deployment neu starten, um das Secret zu laden
+kubectl deployment rollout restart
 ```
 
 Jetzt sollte der Server über "https://meine.website" erreichbar 

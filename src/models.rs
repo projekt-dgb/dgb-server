@@ -2,7 +2,6 @@
 
 pub use gbx::*;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]

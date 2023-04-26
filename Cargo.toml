@@ -6,7 +6,7 @@ license = "GPL-3.0"
 authors = ["Felix Schütt <Felix.Schuett@vlf-brandenburg.de>"]
 
 [dependencies]
-actix-web = { version = "4.0.1", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies"] }
+actix-web = { version = "4.0.1", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "rustls"] }
 serde = { version = "1.0.137", default-features = false, features = ["std"] }
 serde_derive = { version = "1.0.137", default-features = false, features = [] }
 serde_json = { version = "1.0.81", default-features = false, features = ["std"] }
@@ -38,6 +38,10 @@ uuid = { version = "1.1.2", default-features = false, features = ["v4", "fast-rn
 lz4_flex = { version = "0.9.3", default-features = false }
 actix-cors = { version = "0.6.2", default-features = false, features = [] }
 gbx = { git = "https://github.com/projekt-dgb/gbx", rev = "c624d311f9a0702e07f4aebe97d8bad141803c8f" }
+rustls-acme = { version = "0.6.0" }
+rustls = "0.20.6"
+futures-rustls = "0.22.2"
+futures = "0.3.21"
 
 [dependencies.lettre]
 version = "0.10.0-rc.6"
@@ -72,7 +76,7 @@ debug-assertions = false
 overflow-checks = false
 incremental = false
 rpath = false
-strip = true
+strip = false
 
 [package.metadata.deb]
 maintainer = "Felix Schütt <Felix.Schuett@vlf-brandenburg.de>"

@@ -45,10 +45,14 @@
 //!
 //! - `abo-loeschen`: Löscht das angegebene Abonnement.
 //!
+use crate::k8s::k8s_get_acme_config;
 use crate::{db::GpgPublicKeyPair, models::MountPoint};
-use actix_web::{web::JsonConfig, App, HttpResponse, HttpServer};
+use actix_web::{web::JsonConfig, App, HttpServer};
 use clap::Parser;
+use futures::StreamExt;
 use models::get_data_dir;
+use rustls_acme::caches::DirCache;
+use rustls_acme::AcmeConfig;
 use serde_derive::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -332,7 +336,18 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
                 let app_state = load_app_state().await;
                 let _ = init(&app_state).await?;
                 if !app_state.sync_server() {
-                    startup_http_server(&ip, app_state)
+                    let acme_config = k8s_get_acme_config().await.ok().and_then(|o| o);
+                    let acme_args = std::env::var("ACME_CONFIG")
+                        .ok()
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .or_else(|| acme_config);
+                    if acme_args.is_none() {
+                        println!(
+                            "ACME_ARGS fehlt, Beispiel: {}",
+                            serde_json::to_string(&AcmeArgs::default()).unwrap_or_default()
+                        );
+                    }
+                    startup_http_server(acme_args, &ip, app_state)
                         .await
                         .map_err(|e| format!("{e}"))
                 } else {
@@ -634,8 +649,39 @@ async fn startup_sync_server(ip: &str, app_state: AppState) -> std::io::Result<(
     .await
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AcmeArgs {
+    /// Domains
+    pub domains: Vec<String>,
+    /// Contact info
+    pub email: Vec<String>,
+    /// Cache directory
+    pub cache: Option<PathBuf>,
+    /// Use Let's Encrypt production environment
+    /// (see https://letsencrypt.org/docs/staging-environment/)
+    pub prod: bool,
+}
+
+impl Default for AcmeArgs {
+    fn default() -> AcmeArgs {
+        AcmeArgs {
+            domains: vec![
+                "grundbuch-test.eu".to_string(),
+                "test.grundbuch-test.eu".to_string(),
+            ],
+            email: vec!["test@grundbuch-test.eu".to_string()],
+            cache: Some(std::path::Path::new("acme-cache").to_path_buf()),
+            prod: false,
+        }
+    }
+}
+
 // Server-Start, extra Funktion für Unit-Tests
-async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<()> {
+async fn startup_http_server(
+    acme_args: Option<AcmeArgs>,
+    ip: &str,
+    app_state: AppState,
+) -> std::io::Result<()> {
     let json_cfg = || {
         JsonConfig::default()
             .error_handler(|e, _| {
@@ -649,12 +695,42 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
             .content_type_required(false)
     };
 
-    println!("dgb-server: starte http server");
+    println!("dgb-server: get acme config");
+
+    let rustls_config = acme_args.and_then(|args| {
+        if let Some(c) = args.cache.as_ref() {
+            let _ = std::fs::create_dir_all(c);
+        }
+
+        let mut state = AcmeConfig::new(args.domains)
+            .contact(args.email.iter().map(|e| format!("mailto:{}", e)))
+            .cache_option(args.cache.clone().map(DirCache::new))
+            .directory_lets_encrypt(args.prod)
+            .state();
+
+        let rustls_config = rustls::ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_cert_resolver(state.resolver());
+        let acceptor = state.acceptor();
+
+        tokio::spawn(async move {
+            loop {
+                match state.next().await.unwrap() {
+                    Ok(ok) => log::info!("event: {:?}", ok),
+                    Err(err) => log::error!("error: {:?}", err),
+                }
+            }
+        });
+
+        Some(rustls_config)
+    });
+
     let app_state_clone = app_state.clone();
     let a = async move {
         let app_state_clone = app_state_clone.clone();
 
-        HttpServer::new(move || {
+        let s = HttpServer::new(move || {
             let app_state_clone = app_state_clone.clone();
 
             let cors = actix_cors::Cors::permissive()
@@ -684,10 +760,20 @@ async fn startup_http_server(ip: &str, app_state: AppState) -> std::io::Result<(
                 .service(crate::api::upload::upload)
                 .service(crate::api::abo::abo_neu)
                 .service(crate::api::abo::abo_loeschen)
-        })
-        .bind((ip, 8080))?
-        .run()
-        .await
+        });
+
+        if rustls_config.is_some() {
+            println!("dgb-server starte http server auf port 443");
+        } else {
+            println!("dgb-server starte http server auf port 8080");
+        }
+
+        let s = match rustls_config {
+            Some(config) => s.bind_rustls((ip, 443), config)?,
+            None => s.bind((ip, 8080))?,
+        };
+
+        s.run().await
     };
 
     let app_state_clone = app_state.clone();
