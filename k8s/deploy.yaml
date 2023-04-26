@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dgb-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dgb-sync
+  template:
+    metadata:
+      labels:
+        app: dgb-sync
+    spec:
+      containers:
+        - name: sync-server
+          image: fschutt/dgb-server:1.0.2
+          imagePullPolicy: Always
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          ports:
+          - containerPort: 8081
+          - containerPort: 9418
+          volumeMounts:
+            - mountPath: "/mnt/data/files"
+              name: persistent-volume
+          env: 
+            - name: SYNC_MODE
+              value: "1"
+      volumes:
+        - name: persistent-volume
+          persistentVolumeClaim:
+            claimName: persistent-volume
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dgb-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dgb-server
+  template:
+    metadata:
+      labels:
+        app: dgb-server
+    spec:
+      containers:
+        - name: server
+          image: fschutt/dgb-server:1.0.2
+          imagePullPolicy: Always
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          ports:
+          - containerPort: 443
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pod-reader
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: secret-reader
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: secret-reader
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: secret-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: persistent-volume
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: linode-block-storage-retain
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dgb-loadbalancer
+  labels:
+    app: dgb-loadbalancer
+spec:
+  type: LoadBalancer  
+  externalTrafficPolicy: Cluster
+  selector:
+    app: dgb-server
+  ports:
+  - name: https
+    protocol: TCP
+    port: 443
+    targetPort: 443
