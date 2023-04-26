@@ -39,43 +39,51 @@ pub async fn k8s_get_acme_config() -> Result<Option<AcmeArgs>, kube::Error> {
     let pods: Api<Secret> = Api::default_namespaced(client);
     let lp = ListParams::default();
     let list = pods.list(&lp).await;
-    Ok(pods
+    let secret = pods
         .list(&lp)
         .await?
         .iter()
         .filter_map(|s| {
             if s.metadata.name.as_deref().unwrap_or("") != "acme-config" {
                 println!("ignoring secret {:?}", s.metadata.name.as_deref());
+                None
+            } else {
+                Some(s.clone())
             }
-            let s = s.string_data.clone().unwrap_or_default();
-
-            let domains = s
-                .get("domains")
-                .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())
-                .unwrap_or_default();
-            let email = s
-                .get("email")
-                .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())
-                .unwrap_or_default();
-            let cache = s
-                .get("cache")
-                .map(|s| std::path::Path::new(s.trim()).to_path_buf());
-            let prod = s
-                .get("prod")
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_default();
-
-            let args = AcmeArgs {
-                domains,
-                email,
-                cache,
-                prod,
-            };
-            println!("acme args {args:?}");
-
-            Some(args)
         })
-        .next())
+        .next();
+
+    let secret = match secret {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    let s = secret.string_data.clone().unwrap_or_default();
+
+    let domains = s
+        .get("domains")
+        .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())
+        .unwrap_or_default();
+    let email = s
+        .get("email")
+        .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())
+        .unwrap_or_default();
+    let cache = s
+        .get("cache")
+        .map(|s| std::path::Path::new(s.trim()).to_path_buf());
+    let prod = s
+        .get("prod")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_default();
+
+    let args = AcmeArgs {
+        domains,
+        email,
+        cache,
+        prod,
+    };
+    println!("acme args {args:?}");
+    Ok(Some(args))
 }
 
 // https://stackoverflow.com/questions/57913132

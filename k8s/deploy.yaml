@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: sync-server
-          image: fschutt/dgb-server:1.0.2
+          image: fschutt/dgb-server:1.0.3
           imagePullPolicy: Always
           resources:
             limits:
@@ -50,7 +50,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: fschutt/dgb-server:1.0.2
+          image: fschutt/dgb-server:1.0.3
           imagePullPolicy: Always
           resources:
             limits:
@@ -58,6 +58,7 @@ spec:
               cpu: "100m"
           ports:
           - containerPort: 443
+          - containerPort: 8080
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -127,6 +128,10 @@ spec:
   selector:
     app: dgb-server
   ports:
+  - name: http
+    protocol: TCP
+    port: 80
+    targetPort: 8080
   - name: https
     protocol: TCP
     port: 443
