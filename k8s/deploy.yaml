@@ -7,7 +7,7 @@ stringData:
   domains: "grundbuch-test.eu, test.grundbuch-test.eu"
   email: "abc@test.com"
   cache: /tmp/cache/acme_challenges
-  prod: true
+  prod: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: fschutt/dgb-server:1.0.3
+          image: fschutt/dgb-server:1.0.4
           imagePullPolicy: Always
           resources:
             limits:
@@ -51,7 +51,7 @@ spec:
     spec:
       containers:
         - name: sync-server
-          image: fschutt/dgb-server:1.0.3
+          image: fschutt/dgb-server:1.0.4
           imagePullPolicy: Always
           resources:
             limits:
