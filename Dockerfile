@@ -1,7 +1,7 @@
 # -*- mode: dockerfile -*-
 # syntax=docker/dockerfile:1.2
 
-FROM rust:1.63.0-slim-bullseye as builder
+FROM rust:1.65.0-slim-bullseye as builder
 WORKDIR /dgb-server
 COPY . .
 RUN apt-get update && apt install -y gcc make build-essential libsodium-dev && rm -rf /var/lib/apt/lists/*
