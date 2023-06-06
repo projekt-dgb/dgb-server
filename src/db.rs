@@ -739,7 +739,7 @@ pub fn passwort_aendern(
         return Err(format!("Passwort zu lang"));
     }
 
-    let password_hashed = hash_password(passwort).as_ref().to_vec();
+    let password_hashed = hash_password(passwort);
 
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
@@ -765,7 +765,7 @@ pub fn create_user(
         return Err(format!("Passwort zu lang"));
     }
 
-    let password_hashed = hash_password(passwort).as_ref().to_vec();
+    let password_hashed = hash_password(passwort);
 
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
@@ -857,51 +857,34 @@ pub fn bearbeite_benutzer_rechte(
     Ok(())
 }
 
-fn hash_password(password: &str) -> [u8; PASSWORD_LEN] {
-    use sodiumoxide::crypto::pwhash::argon2id13;
-    use sodiumoxide::crypto::pwhash::argon2id13::HashedPassword;
+// given a password, returns the (automatically salted) hash
+pub fn hash_password(password: &str) -> Vec<u8> {
+    use argon2::{
+        password_hash::rand_core::OsRng,
+        password_hash::SaltString, 
+        PasswordHasher, Argon2,
+    };
 
-    let default_pw = HashedPassword([0; PASSWORD_LEN]);
-
-    if let Err(e) = sodiumoxide::init() {
-        return default_pw.0.clone();
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    match argon2.hash_password(password.as_bytes(), &salt) {
+        Ok(o) => o.serialize().as_bytes().to_vec(),
+        Err(_) => vec![0; PASSWORD_LEN],
     }
-
-    let hash = argon2id13::pwhash(
-        password.as_bytes(),
-        argon2id13::OPSLIMIT_INTERACTIVE,
-        argon2id13::MEMLIMIT_INTERACTIVE,
-    )
-    .unwrap_or(default_pw);
-
-    hash.0
 }
 
-fn verify_password(database_pw: &[u8], password: &str) -> bool {
-    use sodiumoxide::crypto::pwhash::argon2id13;
+pub fn verify_password(database_pw: &[u8], password: &str) -> bool {
+    use argon2::PasswordVerifier;
+    use argon2::{password_hash::PasswordHash, Argon2};
 
-    if let Err(_) = sodiumoxide::init() {
-        return false;
-    }
-
-    let mut password_hash: [u8; PASSWORD_LEN] = [0; PASSWORD_LEN];
-
-    if database_pw.len() != PASSWORD_LEN {
-        return false;
-    }
-
-    unsafe {
-        std::ptr::copy(
-            database_pw.as_ptr(),
-            password_hash.as_mut_ptr(),
-            PASSWORD_LEN,
-        );
-    }
-
-    match argon2id13::HashedPassword::from_slice(database_pw) {
-        Some(hp) => argon2id13::pwhash_verify(&hp, password.as_bytes()),
-        _ => false,
-    }
+    let parsed_hash = match PasswordHash::new(core::str::from_utf8(database_pw).unwrap_or("")) {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let argon2 = Argon2::default();
+    argon2
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .is_ok()
 }
 
 /// Gleicht `GpgKeyPair`, nur ohne den privaten Schlüssel
@@ -1294,6 +1277,47 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                         .into_iter()
                         .enumerate()
                         .map(|(i, a)| (i.to_string(), a))
+                        .collect(),
+                },
+            );
+
+            // Grundbücher
+            let verfuegbare_grundbuecher =
+                crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(&benutzer_info)
+                    .unwrap_or_default();
+
+            data.data.insert(
+                "blaetter".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "land".to_string(),
+                        "amtsgericht".to_string(),
+                        "bezirk".to_string(),
+                        "blatt".to_string(),
+                    ],
+                    daten: verfuegbare_grundbuecher
+                        .into_iter()
+                        .map(|(l, a, g, b)| (format!("{l}/{a}/{g}/{b}"), vec![l, a, g, b]))
+                        .collect(),
+                },
+            );
+
+            // Abonnements
+            let abos =
+                crate::db::get_email_abonnements_fuer_benutzer(&benutzer_info).unwrap_or_default();
+
+            data.data.insert(
+                "abonnements".to_string(),
+                KontoTabelle {
+                    spalten: vec![
+                        "amtsgericht".to_string(),
+                        "bezirk".to_string(),
+                        "blatt".to_string(),
+                        "aktenzeichen".to_string(),
+                    ],
+                    daten: abos
+                        .into_iter()
+                        .map(|(l, a, g, b)| (format!("{l}/{a}/{g}/{b}"), vec![l, a, g, b]))
                         .collect(),
                 },
             );
@@ -1792,12 +1816,18 @@ pub fn get_email_abonnements_fuer_benutzer(
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    let mut stmt = conn.prepare(
+    let is_admin = benutzer.rechte == "admin";
+    let mut stmt = conn.prepare(if is_admin {
+        "SELECT amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE typ = 'email'"
+    } else {
         "SELECT amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE typ = 'email' AND text = ?1"
-    ).map_err(|e| format!("{e}"))?;
+    }).map_err(|e| format!("{e}"))?;
 
+    let pa = rusqlite::params![benutzer.email];
+    let pb = rusqlite::params![];
+    let params = if is_admin { pa } else { pb };
     let abos = stmt
-        .query_map(rusqlite::params![benutzer.email], |r| {
+        .query_map(params, |r| {
             Ok((
                 r.get::<usize, String>(0)?,
                 r.get::<usize, String>(1)?,
@@ -1822,28 +1852,7 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    let mut stmt = conn
-        .prepare("SELECT land, amtsgericht, bezirk, blatt FROM zugriffe WHERE email = ?1")
-        .map_err(|e| format!("{e}"))?;
-
-    let zugriffe = stmt
-        .query_map(rusqlite::params![benutzer.email], |r| {
-            Ok((
-                r.get::<usize, String>(0)?,
-                r.get::<usize, String>(1)?,
-                r.get::<usize, String>(2)?,
-                r.get::<usize, String>(3)?,
-            ))
-        })
-        .map_err(|e| format!("{e}"))?
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("{e}"))?;
-
-    if zugriffe.is_empty() {
-        return Ok(Vec::new());
-    }
-
+    let is_admin = benutzer.rechte == "admin";
     let mut alle_grundbuecher = conn
         .prepare("SELECT land, amtsgericht, bezirk, blatt FROM grundbuchblaetter")
         .map_err(|e| format!("{e}"))?;
@@ -1866,8 +1875,34 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
         return Ok(Vec::new());
     }
 
-    let zugriffe = zugriffe.into_iter().collect::<BTreeSet<_>>();
     let grundbuchblaetter = grundbuchblaetter.into_iter().collect::<BTreeSet<_>>();
+    if is_admin {
+        return Ok(grundbuchblaetter.into_iter().collect::<Vec<_>>());
+    }
+
+    let mut stmt = conn
+        .prepare("SELECT land, amtsgericht, bezirk, blatt FROM zugriffe WHERE email = ?1")
+        .map_err(|e| format!("{e}"))?;
+
+    let zugriffe = stmt
+        .query_map(rusqlite::params![benutzer.email], |r| {
+            Ok((
+                r.get::<usize, String>(0)?,
+                r.get::<usize, String>(1)?,
+                r.get::<usize, String>(2)?,
+                r.get::<usize, String>(3)?,
+            ))
+        })
+        .map_err(|e| format!("{e}"))?
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{e}"))?;
+
+    if zugriffe.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let zugriffe = zugriffe.into_iter().collect::<BTreeSet<_>>();
     let result = grundbuchblaetter
         .intersection(&zugriffe)
         .cloned()

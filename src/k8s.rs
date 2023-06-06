@@ -16,7 +16,13 @@ use kube::{
 use crate::AcmeArgs;
 
 pub async fn is_running_in_k8s() -> bool {
-    Client::try_default().await.is_ok()
+    let client = match Client::try_default().await {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let pods: Api<Secret> = Api::default_namespaced(client);
+    let lp = ListParams::default();
+    pods.list(&lp).await.is_ok()
 }
 
 pub async fn k8s_list_pods() -> Result<String, String> {
@@ -44,22 +50,26 @@ pub async fn k8s_get_acme_config() -> Result<Option<AcmeArgs>, kube::Error> {
         .await?
         .iter()
         .filter_map(|s| {
-            if s.metadata.name.as_deref().unwrap_or("") != "acme-config" {
-                println!("ignoring secret {:?}", s.metadata.name.as_deref());
-                None
-            } else {
+            if s.metadata.name.as_deref().unwrap_or("") == "acme-config" {
                 Some(s.clone())
+            } else {
+                None
             }
         })
         .next();
 
     let secret = match secret {
         Some(s) => s,
-        None => return Ok(None),
+        None => {
+            println!("kein acme-config secret");
+            return Ok(None); 
+        },
     };
 
     let s = secret.string_data.clone().unwrap_or_default();
 
+    println!("secret {s:#?}");
+    
     let domains = s
         .get("domains")
         .map(|d| d.split(",").map(|d| d.trim().to_string()).collect())

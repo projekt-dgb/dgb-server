@@ -12,26 +12,28 @@ var kontotyp = getKontoDaten().kontotyp;
 var sidebar_items = [];
 if (kontotyp == "admin") {
     sidebar_items = [
+        "Grundbücher",
         "Änderungen",
         "Zugriffe",
         "Benutzer",
         "Bezirke",
-        "Einstellungen",
-    ]
-} else if (kontotyp == "gast") {
-    sidebar_items = [
-        "Grundbuchblätter",
         "Abonnements",
         "Einstellungen",
     ]
 } else if (kontotyp == "bearbeiter") {
     sidebar_items = [
+        "Grundbücher",
         "Änderungen",
-        "Grundbuchblätter",
         "Abonnements",
         "Einstellungen",
     ]
-}
+} else if (kontotyp == "gast") {
+    sidebar_items = [
+        "Grundbücher",
+        "Abonnements",
+        "Einstellungen",
+    ]
+} 
 
 var active_sidebar = 0;
 var filter_by = null;
@@ -41,14 +43,18 @@ var selected = [];
 function getActiveSectionName() {
     if (kontotyp == "admin") {
         if (active_sidebar == 0) {
-            return "aenderungen";
+            return "blaetter";
         } else if (active_sidebar == 1) {
-            return "zugriffe";
+            return "aenderungen";
         } else if (active_sidebar == 2) {
-            return "benutzer";
+            return "zugriffe";
         } else if (active_sidebar == 3) {
-            return "bezirke";
+            return "benutzer";
         } else if (active_sidebar == 4) {
+            return "bezirke";
+        } else if (active_sidebar == 5) {
+            return "abonnements";
+        } else if (active_sidebar == 6) {
             return "meine-kontodaten";
         } else {
             return "";
@@ -156,7 +162,7 @@ function selectAllVisible() {
             selected.push(bezirk_id);
         } else if (kontotyp == "admin" && active_section == "meine-kontodaten") {
         
-        } else if (kontotyp == "gast" && active_section == "blaetter") {
+        } else if (active_section == "blaetter") {
             var blatt_id = row[0] + "/" + row[1] + "/" + row[2] + "/" + row[3];
             selected.push(blatt_id);
         }
@@ -207,21 +213,14 @@ function renderHeader(id) {
             "Einstellung",
             "Wert"
         ];
-    } else if (
-        (kontotyp == "gast" && id == "blaetter") ||
-        (kontotyp == "admin" && id == "blaetter") ||
-        (kontotyp == "bearbeiter" && id == "blaetter")
-    ) {
+    } else if (id == "blaetter") {
         spalten = [
             "Land",
             "Amtsgericht",
             "Bezirk",
             "Blatt"
         ];
-    } else if (
-        (kontotyp == "gast" && id == "abonnements") ||
-        (kontotyp == "bearbeiter" && id == "abonnements")
-    ) {
+    } else if (id == "abonnements") {
         spalten = [
             "Amtsgericht",
             "Bezirk",
@@ -252,7 +251,7 @@ function renderHeader(id) {
     check_uncheck_all_node_div.appendChild(check_uncheck_all_node);
     header_column_node.appendChild(check_uncheck_all_node_div);
 
-    if (kontotyp == "gast" && id == "blaetter") {
+    if (id == "blaetter") {
         var check_uncheck_all_node_div = document.createElement("div");
         check_uncheck_all_node_div.style.maxWidth = "18px";
         check_uncheck_all_node_div.style.minWidth = "18px";
@@ -340,9 +339,10 @@ function rowIsValid(cells, filter) {
     if (!filter) {
         return true;
     }
+    var fl = filter.toLowerCase();
     for (var i = 0; i < cells.length; i++) {
         var e = cells[i];
-        if (e.includes(filter)) { return true; }
+        if (e.toLowerCase().includes(fl)) { return true; }
     }
     return false;
 }
@@ -771,10 +771,7 @@ function renderRows(id) {
             non_check_node.appendChild(cell_node);
 
             row_node.appendChild(non_check_node);
-        } else if (
-            (kontotyp == "admin" && id == "meine-kontodaten") ||
-            (kontotyp == "bearbeiter" && id == "meine-kontodaten") ||
-            (kontotyp == "gast" && id == "meine-kontodaten")) {
+        } else if (id == "meine-kontodaten") {
 
             var einstellung_id = e;
             var einstellung = row[1];
@@ -832,10 +829,7 @@ function renderRows(id) {
             non_check_node.appendChild(cell_node);
 
             row_node.appendChild(non_check_node);
-        } else if (
-            (kontotyp == "gast" && id == "blaetter") ||
-            (kontotyp == "bearbeiter" && id == "blaetter") 
-        ) {
+        } else if (id == "blaetter") {
 
             var land = row[0];
             var amtsgericht = row[1];
@@ -888,7 +882,7 @@ function renderRows(id) {
             }
 
             row_node.appendChild(non_check_node);
-        } else if (kontotyp == "gast" && id == "abonnements") {
+        } else if (id == "abonnements") {
 
             var abo_id = row[0];
             var amtsgericht = row[1];
@@ -1065,12 +1059,12 @@ function renderActions(id) {
         loeschen.textContent = "Bezirk löschen";
         loeschen.onclick = function() { bezirkLoeschen(); }
         actions_data.appendChild(loeschen);
-    } else if (kontotyp == "gast" && id == "blaetter") {
+    } else if (id == "blaetter") {
         var herunterladen = document.createElement("button");
         herunterladen.textContent = "Ausgewählte Blätter als .zip herunterladen";
         herunterladen.onclick = function(){ blaetterAlsZip(); };
         actions_data.appendChild(herunterladen);
-    } else if (kontotyp == "gast" && id == "abonnements") {
+    } else if (id == "abonnements") {
         var neu = document.createElement("button");
         neu.textContent = "Neues Abonnement";
         neu.onclick = function(){ aboNeu(); };

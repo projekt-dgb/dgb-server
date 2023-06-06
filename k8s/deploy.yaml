@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: server
-          image: fschutt/dgb-server:1.0.4
+          image: fschutt/dgb-server:1.0.5
           imagePullPolicy: Always
           resources:
             limits:
@@ -51,7 +51,7 @@ spec:
     spec:
       containers:
         - name: sync-server
-          image: fschutt/dgb-server:1.0.4
+          image: fschutt/dgb-server:1.0.5
           imagePullPolicy: Always
           resources:
             limits:

@@ -47,7 +47,6 @@
 //!
 use crate::k8s::k8s_get_acme_config;
 use crate::{db::GpgPublicKeyPair, models::MountPoint};
-use actix_web::web::Json;
 use actix_web::{web::JsonConfig, App, HttpServer};
 use clap::Parser;
 use futures::StreamExt;
