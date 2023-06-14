@@ -4,6 +4,7 @@ use lettre::{
     Message, SmtpTransport, Transport,
 };
 use serde_derive::{Deserialize, Serialize};
+use crate::models::AbonnementInfoBlattNr;
 
 // Um die E-Mails zu verschicken, brauchen wir Zugriff
 // zu einem Server. Die Daten werden beim Start des Servers
@@ -23,14 +24,13 @@ pub struct AboWebhookInfo {
     pub server_url: String,
     pub amtsgericht: String,
     pub grundbuchbezirk: String,
-    pub blatt: i32,
+    pub blatt: AbonnementInfoBlattNr,
     pub webhook: String,
     pub aktenzeichen: Option<String>,
     pub aenderungs_id: String,
 }
 
 pub fn send_email(
-    from: &str,
     to: &str,
     subject: &str,
     html: &str,
@@ -40,7 +40,11 @@ pub fn send_email(
     use lettre::transport::smtp::authentication::Mechanism;
     use lettre::transport::smtp::PoolConfig;
 
+    println!("send_email...");
     let smtp_config = crate::db::get_email_config()?;
+
+    let from = format!("Digitales Grundbuch <{}>", smtp_config.email);
+    println!("smtp config = {:#?}", smtp_config);
 
     let email = Message::builder()
         .from(
@@ -66,6 +70,8 @@ pub fn send_email(
         )
         .map_err(|_| format!("Ungültige E-Mail"))?;
 
+    println!("email {:#?}", email);
+
     let mailer = SmtpTransport::starttls_relay(&smtp_config.smtp_adresse)
         .map_err(|e| format!("{e}"))?
         .credentials(Credentials::new(
@@ -76,9 +82,14 @@ pub fn send_email(
         .pool_config(PoolConfig::new().max_size(20))
         .build();
 
-    mailer
+    println!("mailer");
+
+    let r = mailer
         .send(&email)
-        .map_err(|e| format!("failed to deliver message: {e}"))?;
+        .map_err(|e| format!("failed to deliver message: {e}"));
+
+    println!("{:#?}", r);
+    let r = r?;
 
     Ok(())
 }
@@ -167,10 +178,8 @@ Die Einstellung für Benachrichtigungen können Sie in Ihrem Konto über \"Einst
     // Die meisten SMTP-Server überprüfen die Sender-Adresse,
     // E-Mail muss mit den Login-Daten übereinstimmen
     let smtp_config = crate::db::get_email_config()?;
-    let email = smtp_config.email.clone();
 
     send_email(
-        &format!("Grundbuch <{email}>"),
         to,
         &format!("Ihr Zugriff auf Grundbuch {gb_short} wurde gewährt"),
         &html,
@@ -195,12 +204,19 @@ pub fn send_change_email(abo: &AbonnementInfo, commit_id: &str) -> Result<(), St
         aktenzeichen,
     } = abo;
 
+    let blatt = match blatt {
+        AbonnementInfoBlattNr::Alle => "*".to_string(),
+        AbonnementInfoBlattNr::Exakt(i) => i.to_string(),
+    };
     let aktenzeichen = aktenzeichen.clone().unwrap_or_default(); // TODO
     let email = text;
     let email_url = urlencoding::encode(text);
     let amtsgericht_url = urlencoding::encode(amtsgericht);
     let grundbuchbezirk_url = urlencoding::encode(grundbuchbezirk);
-    let aktenzeichen_url = urlencoding::encode(&aktenzeichen);
+    let aktenzeichen_url = match aktenzeichen {
+        None => String::new(),
+        Some(s) => urlencoding::encode(&aktenzeichen), // aktenzeichen_url
+    };
     let server_url = crate::db::get_server_address(MountPoint::Local)?;
 
     let html = format!("<!DOCTYPE html>
@@ -225,16 +241,11 @@ pub fn send_change_email(abo: &AbonnementInfo, commit_id: &str) -> Result<(), St
             </ul>
             
             <p>Um die volle Grundbuchänderung in PDF-Form einzusehen, folgen Sie bitten dem folgenden Link:</p>
-            <a href=\"{server_url}/aenderung/pdf/{commit_id}?email={email_url}\">{server_url}/aenderung/pdf/{commit_id}?email={email_url}</a>
-            <br/>
-            <p>Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgenden Link:</p>
-            <a href=\"{server_url}/aenderung/diff/{commit_id}?email={email_url}\">{server_url}/aenderung/diff/{commit_id}?email={email_url}</a>
+            <a href=\"{server_url}/aenderung/pdf/{commit_id}\">{server_url}/aenderung/pdf/{commit_id}</a>
             <br/>
             
-            <br/>
-
             <p>Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.</p>
-            <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}\">hier</a>.</p>
+            <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/email/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}?email={email_url}{aktenzeichen_url}\">hier</a>.</p>
         </div>
     </body>
     </html>");
@@ -259,12 +270,9 @@ Um das Abonnement zu kündigen, klicken Sie bitte hier:
 
     let amtsgericht_url_lower = amtsgericht_url.to_lowercase();
 
-    let from =
-        format!("Amtsgericht {amtsgericht} <ag-{amtsgericht_url_lower}@grundbuchaenderung.de>");
     let to = email;
 
     send_email(
-        &from,
         to,
         &format!(
             "Grundbuchänderung in {grundbuchbezirk} Blatt {blatt} (Aktenzeichen {aktenzeichen})"

@@ -517,7 +517,7 @@ pub mod konto {
     use crate::{
         api::login::LoginResponse,
         db::{GpgKeyPair, KontoData, KontoDataResult},
-        AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson, BezirkeLoeschenArgs, BezirkeNeuArgs,
+        AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson, BezirkeLoeschenArgs, BezirkeNeuArgs, models::get_data_dir,
     };
 
     #[derive(Deserialize)]
@@ -702,8 +702,10 @@ pub mod konto {
         state: web::Data<AppState>,
         data: web::Json<KontoJsonPost>,
     ) -> impl Responder {
+        
         let result = match konto_post_inner(&*state, &*data).await {
-            Ok(o) => KontoJsonPostResponse::Ok(o),
+            Ok(KontoDataPostType::Json(o)) => KontoJsonPostResponse::Ok(o),
+            Ok(KontoDataPostType::Zip(v)) => return HttpResponse::Ok().content_type("application/zip").body(v),
             Err(e) => KontoJsonPostResponse::Error(e),
         };
 
@@ -712,10 +714,15 @@ pub mod konto {
             .body(serde_json::to_string(&result).unwrap_or_default())
     }
 
+    enum KontoDataPostType {
+        Json(KontoData),
+        Zip(Vec<u8>),
+    }
+
     async fn konto_post_inner(
         app_state: &AppState,
         data: &KontoJsonPost,
-    ) -> Result<KontoData, KontoJsonPostResponseError> {
+    ) -> Result<KontoDataPostType, KontoJsonPostResponseError> {
         use crate::api::commit::DbChangeOp;
         use crate::BezirkNeuArgs;
 
@@ -924,15 +931,173 @@ pub mod konto {
                 .await
                 .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
             }
-            ("gast", "blaetter-als-zip") | ("bearbeiter", "blaetter-als-zip") => {
-                // TODO
+            (_, "blaetter-als-zip") => {
+                use std::path::Path;
+                use crate::models::MountPoint;
+
+                let grundbuchblaetter = crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(&benutzer)
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+                println!("blaetter als zip!");
+                
+                let mut files = Vec::new();
+                for l in data.daten.iter() {
+                    let s = l.split("/").collect::<Vec<_>>();
+                    let (la, ag, bez, blatt) = match s.chunks(4).next() {
+                        Some(&[la, ag, bez, blatt]) => (la.to_string(), ag.to_string(), bez.to_string(), blatt.to_string()),
+                        _ => continue,
+                    };
+                    println!("testing {l:?}");
+                    if grundbuchblaetter.iter().any(|(l, a, b, b2)| (l, a, b, b2) == (&la, &ag, &bez, &blatt)) {
+                        println!("download blaetter als zip {:?}", s);
+                        match std::fs::read_to_string(Path::new(&get_data_dir(MountPoint::Local)).join(&la).join(&ag).join(&bez).join(format!("{bez}_{blatt}.gbx"))) {
+                            Ok(o) => {
+                                files.push((None, Path::new(&format!("/{la}/{ag}/{bez}/{blatt}.gbx")).to_path_buf(), o.as_bytes().to_vec()));
+                                if let Ok(f) = serde_json::from_str::<gbx::PdfFile>(&o) {
+                                    let options = crate::pdf::PdfGrundbuchOptions {
+                                        exportiere_bv: true,
+                                        exportiere_abt1: true,
+                                        exportiere_abt2: true,
+                                        exportiere_abt3: true,
+                                        leere_seite_nach_titelblatt: true,
+                                        mit_geroeteten_eintraegen: true, // TODO
+                                    };
+                            
+                                    let pdf_bytes = crate::api::download::generate_pdf(&f.analysiert, &options);
+                                    files.push((None, Path::new(&format!("/{la}/{ag}/{bez}/{blatt}.pdf")).to_path_buf(), pdf_bytes));
+                                }
+                            },
+                            Err(_) => continue,
+                        }
+                    }
+                }
+                let zip_data = crate::zip::write_files_to_zip(&files);
+                println!("zip data {}", zip_data.len());
+                return Ok(KontoDataPostType::Zip(zip_data))
             }
             ("gast", "abo-neu") | ("bearbeiter", "abo-neu") => {
-                // TODO
-            }
+
+                let typ = match data.daten.get(0).map(|s| s.as_str()) {
+                    Some("email") => "email",
+                    Some("webhook") => "webhook",
+                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
+                };
+
+                let text = match typ {
+                    "email" => benutzer.email.clone(),
+                    "webhook" => {
+                        data.daten.get(1)
+                        .and_then(|u| reqwest::Url::parse(u).ok())
+                        .map(|u| u.to_string())
+                        .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Keine Webhook-URL angegeben".to_string() })?
+                    }
+                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
+                };
+
+                let ag = data.daten.get(2).map(|s| s.trim().to_string())
+                .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Kein Amtsgericht angegeben".to_string() })?;
+
+                let bezirk = data.daten.get(3).map(|s| s.trim().to_string())
+                .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Kein Grundbuchbezirk angegeben".to_string() })?;
+
+                let blatt = data.daten.get(4).map(|s| s.trim().to_string())
+                .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Keine Blattnr. angegeben (* = alle Blätter)".to_string() })?;
+
+                let aktenzeichen = data.daten.get(5).map(|s| s.trim().to_string());
+
+                crate::api::write_to_root_db(
+                    DbChangeOp::AboNeu(crate::AboNeuArgs { 
+                        typ: typ.to_string(), 
+                        blatt: format!("{ag}/{bezirk}/{blatt}"), 
+                        text: text, 
+                        aktenzeichen: aktenzeichen,
+                    }),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            },
+            ("admin", "abo-neu") => {
+                
+                let typ = match data.daten.get(0).map(|s| s.as_str()) {
+                    Some("email") => "email",
+                    Some("webhook") => "webhook",
+                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
+                };
+
+                let text = match typ {
+                    "email" => {
+                        data.daten.get(1)
+                        .map(|u| u.to_string())
+                        .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Keine E-Mail angegeben".to_string() })?
+                    },
+                    "webhook" => {
+                        data.daten.get(1)
+                        .and_then(|u| reqwest::Url::parse(u).ok())
+                        .map(|u| u.to_string())
+                        .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Keine Webhook-URL angegeben".to_string() })?
+                    }
+                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
+                };
+
+                let ag = data.daten.get(2).map(|s| s.trim().to_string())
+                .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Kein Amtsgericht angegeben".to_string() })?;
+
+                let bezirk = data.daten.get(3).map(|s| s.trim().to_string())
+                .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Kein Grundbuchbezirk angegeben".to_string() })?;
+
+                let blatt = data.daten.get(4).map(|s| s.trim().to_string())
+                .ok_or_else(|| KontoJsonPostResponseError { code: 500, text: "Keine Blattnr. angegeben (* = alle Blätter)".to_string() })?;
+
+                let aktenzeichen = data.daten.get(5).map(|s| s.trim().to_string());
+
+                let args = crate::AboNeuArgs { 
+                    typ: typ.to_string(), 
+                    blatt: format!("{ag}/{bezirk}/{blatt}"), 
+                    text: text, 
+                    aktenzeichen: aktenzeichen,
+                };
+
+                println!("abo neu {args:?}");
+
+                crate::api::write_to_root_db(
+                    DbChangeOp::AboNeu(args),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+            },
             ("gast", "abo-loeschen") | ("bearbeiter", "abo-loeschen") => {
-                // TODO
-            }
+                let typ = match data.daten.get(0).map(|s| s.as_str()) {
+                    Some("email") => "email",
+                    Some("webhook") => "webhook",
+                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
+                };
+
+                println!("data daten {:?}", data.daten);
+            },
+            ("admin", "abo-loeschen") => {
+
+                let typ = match data.daten.get(0).map(|s| s.as_str()) {
+                    Some("email") => "email",
+                    Some("webhook") => "webhook",
+                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
+                };
+
+                println!("admin abo loeschen {:#?}", data.daten);
+                /* 
+                crate::api::write_to_root_db(
+                    DbChangeOp::AboLoeschen(crate::AboLoeschenArgs {
+                        typ: ,
+                        blatt: ,
+                        text: ,
+                        aktenzeichen: ,
+                    }),
+                    &app_state,
+                )
+                .await
+                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+                */
+            },
             _ => {
                 return Err(KontoJsonPostResponseError {
                     code: 500,
@@ -949,7 +1114,7 @@ pub mod konto {
             KontoDataResult::KeinPasswort => KontoData::default(),
         };
 
-        Ok(konto_data)
+        Ok(KontoDataPostType::Json(konto_data))
     }
 
     #[post("/konto-neu")]
@@ -1074,11 +1239,14 @@ pub mod commit {
         }
     }
 
-    async fn commit_internal(
+    pub async fn commit_internal(
         upload_changeset: &UploadChangeset,
         app_state: &AppState,
         req: &HttpRequest,
     ) -> Result<HttpResponse, HttpResponse> {
+
+        println!("commit_internal");
+
         let upload_changeset = &*upload_changeset;
         let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
 
@@ -1164,10 +1332,15 @@ pub mod commit {
                 }
             }
         } else {
+            println!("local...");
             let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
             sync_changes_to_disk(&upload_changeset, &local_path)?;
+            println!("changes synced!");
             let _ = commit_changes(&app_state, &local_path, &benutzer, &upload_changeset).await;
+            println!("committed!");
         }
+
+        println!("inserting grundbuchblätter...");
 
         // Alle neuen Grundbuch-Blätter registrieren
         if upload_changeset.data.neu.is_empty() {
@@ -1183,6 +1356,8 @@ pub mod commit {
 
         let gemarkungsbezirke = crate::db::get_gemarkungen().unwrap_or_default();
 
+        println!("inserting grundbuchblätter {:#?}", upload_changeset.data.neu);
+
         for neu in upload_changeset.data.neu.iter() {
             let land = gemarkungsbezirke
                 .iter()
@@ -1197,6 +1372,13 @@ pub mod commit {
                 Some(s) => s,
                 None => continue,
             };
+
+            println!("insert into grundbuecher {:#?}", &[
+                land.to_string(),
+                neu.analysiert.titelblatt.amtsgericht.to_string(),
+                neu.analysiert.titelblatt.grundbuch_von.to_string(),
+                neu.analysiert.titelblatt.blatt.to_string(),
+            ]);
 
             let _ = stmt.execute(rusqlite::params![
                 land.to_string(),
@@ -1581,7 +1763,7 @@ pub mod pull {
 /// API für `/upload` Anfragen
 pub mod upload {
 
-    use super::commit::CommitResponse;
+    use super::commit::{CommitResponse, commit_internal};
     use crate::{
         db::GemarkungsBezirke,
         models::{get_data_dir, BenutzerInfo, MountPoint, PdfFile},
@@ -1715,12 +1897,11 @@ pub mod upload {
                 "Konnte Änderung nicht speichern: kein Synchronisationsserver aktiv.".to_string(),
             ));
         } else {
-            let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
-            sync_changes_to_disk(&upload_changeset, &local_path)?;
-            commit_changes(&app_state, &local_path, &benutzer, &upload_changeset)
-                .await
-                .map_err(|e| response_err(500, format!("Konnte Änderung nicht speichern: {e}")))?;
-            Ok(response_ok())
+            commit_internal(
+                upload_changeset,
+                app_state,
+                req,
+            ).await
         }
     }
 
@@ -1995,8 +2176,11 @@ pub mod upload {
             .commit()
             .map_err(|e| format!("Fehler bei index.commit(): {e}"))?;
 
+        println!("commit_changes");
+
         for blatt in geaendert_blaetter {
             let webhook_abos = crate::db::get_webhook_abos(&blatt).map_err(|e| format!("{e}"))?;
+            println!("webhook_abos {:#?}", webhook_abos);
 
             for abo_info in webhook_abos {
                 let _ = crate::email::send_change_webhook(&abo_info, &commit_id).await;
@@ -2004,10 +2188,15 @@ pub mod upload {
 
             let email_abos = crate::db::get_email_abos(&blatt).map_err(|e| format!("{e}"))?;
 
+            println!("email_abos {:#?}", email_abos);
+
             for abo_info in email_abos {
                 let _ = crate::email::send_change_email(&abo_info, &commit_id);
+                println!("{:#?}", abo_info);
             }
         }
+
+        println!("commit changes ok");
 
         Ok(())
     }
@@ -2243,7 +2432,7 @@ pub mod download {
         doc.save_to_bytes().unwrap_or_default()
     }
 
-    fn generate_pdf(gb: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<u8> {
+    pub fn generate_pdf(gb: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<u8> {
         use crate::pdf::PdfFonts;
         use printpdf::Mm;
         use printpdf::PdfDocument;
@@ -2368,7 +2557,7 @@ pub mod suche {
                     .filter(|a| {
                         a.amtsgericht == ergebnis.amtsgericht
                             && a.grundbuchbezirk == ergebnis.grundbuch_von
-                            && a.blatt.to_string() == ergebnis.blatt
+                            && a.blatt.matches(&ergebnis.blatt)
                     })
                     .cloned()
                     .collect();

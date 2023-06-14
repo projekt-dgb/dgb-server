@@ -84,7 +84,22 @@ pub struct BenutzerInfo {
 pub struct AbonnementInfo {
     pub amtsgericht: String,
     pub grundbuchbezirk: String,
-    pub blatt: i32,
+    pub blatt: AbonnementInfoBlattNr,
     pub text: String,
     pub aktenzeichen: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AbonnementInfoBlattNr {
+    Alle,
+    Exakt(i32),
+}
+
+impl AbonnementInfoBlattNr {
+    pub fn matches(&self, s: &str) -> bool {
+        match self {
+            AbonnementInfoBlattNr::Alle => true,
+            AbonnementInfoBlattNr::Exakt(i) => i.to_string() == s.trim(),
+        }
+    }
 }

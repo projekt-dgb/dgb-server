@@ -1,5 +1,28 @@
 'use strict';
 
+var downloadBlob = function(data, fileName, mimeType) {
+  var blob, url;
+  blob = new Blob([data], {
+    type: mimeType
+  });
+  url = window.URL.createObjectURL(blob);
+  downloadURL(url, fileName);
+  setTimeout(function() {
+    return window.URL.revokeObjectURL(url);
+  }, 1000);
+};
+
+var downloadURL = function(data, fileName) {
+  var a;
+  a = document.createElement('a');
+  a.href = data;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.style = 'display: none';
+  a.click();
+  a.remove();
+};
+
 function getKontoDaten() {
     return JSON.parse(document.getElementById("konto-daten").dataset.kontoDaten);
 }
@@ -222,10 +245,12 @@ function renderHeader(id) {
         ];
     } else if (id == "abonnements") {
         spalten = [
+            "Typ",
+            "Benutzer / URL",
             "Amtsgericht",
             "Bezirk",
             "Blatt",
-            "Aktenzeichen"
+            "Aktenzeichen",
         ];
     }
 
@@ -835,7 +860,7 @@ function renderRows(id) {
             var amtsgericht = row[1];
             var bezirk = row[2];
             var blatt = row[3];
-            var blatt_id = land + "/" + bezirk + "/" + amtsgericht + "/" + blatt;
+            var blatt_id = land + "/" + amtsgericht + "/" + bezirk + "/" + blatt;
 
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.flexDirection = "column";
@@ -868,27 +893,52 @@ function renderRows(id) {
             var values = [land, amtsgericht, bezirk, blatt];
 
             for (var q = 0; q < values.length; q++) {
+
                 var e = values[q];
                 var cell_node = document.createElement("div");
                 cell_node.classList.add("row-cell");
                 cell_node.style.width = "25%";
                 cell_node.style.minWidth = "25%";
                 cell_node.style.maxWidth = "25%";
+                cell_node.style.flexDirection = "row";
+
                 var cell_text = document.createElement("p");
-                var textnode1 = document.createTextNode(e);
-                cell_text.appendChild(textnode1);
+                cell_text.appendChild(document.createTextNode(e));
                 cell_node.appendChild(cell_text);
+
+                if (q == 3) {
+                    var spacer = document.createElement("div");
+                    spacer.style.display = "flex";
+                    spacer.style.flexGrow = "1";
+                    cell_node.appendChild(spacer);
+    
+                    var pdf_link = document.createElement("a");
+                    pdf_link.href = "/download/pdf/" + amtsgericht + "/" + bezirk + "/" + blatt;
+                    pdf_link.style.textDecoration = "underline";
+                    pdf_link.style.fontSize = "0.8rem";
+                    pdf_link.style.marginRight = "5px";
+                    pdf_link.appendChild(document.createTextNode("PDF"));
+                    cell_node.appendChild(pdf_link);
+    
+                    var gbx_link = document.createElement("a");
+                    gbx_link.href = "/download/gbx/" + amtsgericht + "/" + bezirk + "/" + blatt;
+                    gbx_link.style.textDecoration = "underline";
+                    gbx_link.style.fontSize = "0.8rem";
+                    gbx_link.appendChild(document.createTextNode("GBX"));
+                    cell_node.appendChild(gbx_link);    
+                }
+
                 non_check_node.appendChild(cell_node);
             }
 
             row_node.appendChild(non_check_node);
         } else if (id == "abonnements") {
-
-            var abo_id = row[0];
-            var amtsgericht = row[1];
-            var bezirk = row[2];
-            var blatt = row[3];
-            var aktenzeichen = row[4];
+            var typ = row[0];
+            var text = row[1];
+            var amtsgericht = row[2];
+            var bezirk = row[3];
+            var blatt = row[4];
+            var aktenzeichen = row[5];
 
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.flexDirection = "column";
@@ -899,8 +949,8 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
-            check_node.dataset.id = abo_id;
-            check_node.checked = selected.includes(abo_id);
+            check_node.dataset.id = e;
+            check_node.checked = selected.includes(e);
             check_node.addEventListener('change', function(event) {
                 if (event.currentTarget.checked) {
                     addToSelection(event.currentTarget);
@@ -913,15 +963,16 @@ function renderRows(id) {
 
             var non_check_node = document.createElement("div");
 
-            var values = [amtsgericht, bezirk, blatt, aktenzeichen];
+            var values = [typ, text, amtsgericht, bezirk, blatt, aktenzeichen];
 
             for (var q = 0; q < values.length; q++) {
                 var e = values[q];
                 var cell_node = document.createElement("div");
                 cell_node.classList.add("row-cell");
-                cell_node.style.width = "25%";
-                cell_node.style.minWidth = "25%";
-                cell_node.style.maxWidth = "25%";
+                var pct = 100 / values.length;
+                cell_node.style.width = pct + "%";
+                cell_node.style.minWidth = pct + "%";
+                cell_node.style.maxWidth = pct + "%";
                 var cell_text = document.createElement("p");
                 var textnode1 = document.createTextNode(e);
                 cell_text.appendChild(textnode1);
@@ -1133,7 +1184,26 @@ function zugriffAblehnen() {
 }
 
 function blaetterAlsZip() {
-    postToServer("blaetter-als-zip", selected);
+    var auth = document.getElementById("token-id").dataset.tokenId;
+    if (!auth) {
+        return;
+    }
+    var http = new XMLHttpRequest();
+    http.open('POST', '/konto', true);
+    http.setRequestHeader('Content-type', 'application/json');
+    http.responseType = "arraybuffer";
+
+    http.onreadystatechange = function() {
+        if (http.readyState == 4 && http.status == 200) {
+            const byteArray = new Uint8Array(http.response);
+            downloadBlob(byteArray, "download.zip", 'application/zip');
+        }
+    }
+    http.send(JSON.stringify({
+        auth: auth,
+        aktion: "blaetter-als-zip",
+        daten: selected,
+    }));
 }
 
 function benutzerBearbeiten(target) {
@@ -1151,6 +1221,23 @@ function benutzerBearbeiten(target) {
 }
 
 function aboNeu() {
+    var typ = window.prompt("Abo-Typ (email | webhook)", "");
+    if (!typ) { return; }
+    if (typ != "email" && typ != "webhook") {
+        alert("Falscher Typ, bitte 'email' oder 'webhook' eingeben");
+        return;
+    }
+
+    var text = null;
+    if (kontotyp == "admin" && typ == "email") {
+        text = window.prompt("E-Mail", "");
+    } else if (typ == "webhook") {
+        text = window.prompt("Webhook-URL", "");
+    } else {
+        text = "";
+    }
+    if (!text) { return; }
+    
     var amtsgericht = window.prompt("Amtsgericht", "");
     if (!amtsgericht) { return; }
     var bezirk = window.prompt("Bezirk", "");
@@ -1159,7 +1246,7 @@ function aboNeu() {
     if (!blatt) { return; }
     var aktenzeichen = window.prompt("Aktenzeichen", "");
     if (!aktenzeichen) { return; }
-    postToServer("abo-neu", [amtsgericht, bezirk, blatt, aktenzeichen]);
+    postToServer("abo-neu", [typ, text, amtsgericht, bezirk, blatt, aktenzeichen]);
 }
 
 function aboLoeschen() {

@@ -67,6 +67,7 @@ pub mod models;
 pub mod pdf;
 pub mod pgp;
 pub mod suche;
+pub mod zip;
 
 #[derive(Debug, Clone)]
 pub struct AppState {

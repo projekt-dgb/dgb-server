@@ -42,6 +42,7 @@ rustls-acme = { version = "0.6.0" }
 rustls = "0.20.6"
 futures-rustls = "0.22.2"
 futures = "0.3.21"
+zip = "0.6.6"
 
 [dependencies.lettre]
 version = "0.10.0-rc.6"
