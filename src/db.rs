@@ -165,6 +165,7 @@ pub fn create_database(mount_point: MountPoint) -> Result<(), rusqlite::Error> {
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS abonnements (
+            id              VARCHAR(255) NOT NULL,
             typ              VARCHAR(50) NOT NULL,
             text             VARCHAR(1023) NOT NULL,
             amtsgericht      VARCHAR(255) NOT NULL,
@@ -1329,6 +1330,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                 "abonnements".to_string(),
                 KontoTabelle {
                     spalten: vec![
+                        "id".to_string(),
                         "typ".to_string(),
                         "text".to_string(),
                         "amtsgericht".to_string(),
@@ -1338,7 +1340,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                     ],
                     daten: abos
                         .into_iter()
-                        .map(|(typ, text, l, a, g, b)| (format!("{typ}/{text}/{l}/{a}/{g}/{b}"), vec![typ, text, l, a, g, b]))
+                        .map(|(id, typ, text, l, a, g, b)| (id.clone(), vec![id, typ, text, l, a, g, b]))
                         .collect(),
                     .. Default::default()
                 },
@@ -1462,6 +1464,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                 "abonnements".to_string(),
                 KontoTabelle {
                     spalten: vec![
+                        "id".to_string(),
                         "typ".to_string(),
                         "text".to_string(),
                         "amtsgericht".to_string(),
@@ -1471,7 +1474,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                     ],
                     daten: abos
                         .into_iter()
-                        .map(|(typ, text, l, a, g, b)| (format!("{typ}/{text}/{l}/{a}/{g}/{b}"), vec![typ, text, l, a, g, b]))
+                        .map(|(id, typ, text, l, a, g, b)| (id.to_string(), vec![id, typ, text, l, a, g, b]))
                         .collect(),
                     .. Default::default()
                 },
@@ -1546,7 +1549,7 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                     ],
                     daten: abos
                         .into_iter()
-                        .map(|(typ, text, l, a, g, b)| (format!("{typ}/{text}/{l}/{a}/{g}/{b}"), vec![typ, text, l, a, g, b]))
+                        .map(|(id, typ, text, l, a, g, b)| (id.clone(), vec![id, typ, text, l, a, g, b]))
                         .collect(),
                     .. Default::default()
                 },
@@ -1603,12 +1606,13 @@ pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
         .and_then(|c| c.target())
         .and_then(|head_target| repo.find_commit(head_target).ok());
 
-    let head = match head {
+    let mut head = match head {
         Some(s) => s,
         None => return Vec::new(),
     };
 
-    let commits = vec![
+
+    let mut commits = vec![vec![
         format!("{}", head.id()),
         head.author().name().unwrap_or("").to_string(),
         head.author().email().unwrap_or("").to_string(),
@@ -1617,58 +1621,42 @@ pub fn get_aenderungen(filter: AenderungFilter) -> Vec<Vec<String>> {
         head.author().when().sign().to_string(),
         head.summary().map(|s| s.to_string()).unwrap_or_default(),
         head.message().map(|s| s.to_string()).unwrap_or_default(),
-    ];
+    ]];
 
-    let commits = match filter {
-        AenderungFilter::GetLast(i) => {
-            let mut v = if i == 0 { Vec::new() } else { vec![commits] };
-
-            if i <= 1 {
-                return v;
-            }
-
-            v.extend(head.parents().take(i - 1).map(|c| {
-                vec![
-                    format!("{}", c.id()),
-                    c.author().name().unwrap_or("").to_string(),
-                    c.author().email().unwrap_or("").to_string(),
-                    c.author().when().seconds().to_string(),
-                    c.author().when().offset_minutes().to_string(),
-                    c.author().when().sign().to_string(),
-                    c.summary().map(|s| s.to_string()).unwrap_or_default(),
-                ]
-            }));
-
-            v
-        }
-        AenderungFilter::FilterEmail(s) => {
-            let mut v = if s == commits[2] {
-                vec![commits]
-            } else {
-                Vec::new()
-            };
-
-            v.extend(head.parents().filter_map(|c| {
-                let author = c.author();
-                let email = author.email().unwrap_or("");
-                if email != s {
-                    return None;
-                } else {
-                    Some(vec![
-                        format!("{}", c.id()),
-                        c.author().name().unwrap_or("").to_string(),
-                        email.to_string(),
-                        c.author().when().seconds().to_string(),
-                        c.author().when().offset_minutes().to_string(),
-                        c.author().when().sign().to_string(),
-                        c.summary().map(|s| s.to_string()).unwrap_or_default(),
-                    ])
-                }
-            }));
-
-            v
-        }
+    let max_commits = match &filter {
+        AenderungFilter::FilterEmail(_) => 500,
+        AenderungFilter::GetLast(n) => n.clone(),
     };
+
+    let mut i = 0;
+    while i <= max_commits {
+        let next_commit = match head.parents().next() {
+            Some(s) => s,
+            None => break,
+        };
+
+        let email = next_commit.author().email().unwrap_or("").to_string();
+        let found = match &filter {
+            AenderungFilter::FilterEmail(e) => e.as_str() == email.as_str(),
+            AenderungFilter::GetLast(_) => true,
+        };
+
+        let id = format!("{}", next_commit.id());
+        let name = next_commit.author().name().unwrap_or("").to_string();
+
+        commits.push(vec![
+            id, name, email,
+            next_commit.author().when().seconds().to_string(),
+            next_commit.author().when().offset_minutes().to_string(),
+            next_commit.author().when().sign().to_string(),
+            next_commit.summary().map(|s| s.to_string()).unwrap_or_default(),
+        ]);
+
+        head = next_commit;
+        if found {
+            i += 1;
+        }
+    }
 
     commits
 }
@@ -1851,14 +1839,14 @@ pub struct BenutzerGrundbuecher {
 
 pub fn get_email_abonnements_fuer_benutzer(
     benutzer: &BenutzerInfo,
-) -> Result<Vec<(String, String, String, String, String, String)>, String> {
+) -> Result<Vec<(String, String, String, String, String, String, String)>, String> {
     let conn = Connection::open(get_db_path(MountPoint::Local))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
     let is_admin = benutzer.rechte == "admin";
     let mut stmt = conn.prepare(if is_admin {
-        "SELECT typ, text, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements"
+        "SELECT id, typ, text, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements"
     } else {
-        "SELECT typ, text, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE typ = 'email' AND text = ?1"
+        "SELECT id, typ, text, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE typ = 'email' AND text = ?1"
     }).map_err(|e| format!("{e}"))?;
 
     let pa = rusqlite::params![benutzer.email];
@@ -1872,7 +1860,8 @@ pub fn get_email_abonnements_fuer_benutzer(
                 r.get::<usize, String>(2)?,
                 r.get::<usize, String>(3)?,
                 r.get::<usize, String>(4)?,
-                r.get::<usize, Option<String>>(5)?.unwrap_or_default(),
+                r.get::<usize, String>(5)?,
+                r.get::<usize, Option<String>>(6)?.unwrap_or_default(),
             ))
         })
         .map_err(|e| format!("{e}"))?
@@ -2303,9 +2292,11 @@ pub fn create_abo(
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
+    let id = uuid::Uuid::new_v4().to_string();
+
     conn.execute(
-        "INSERT INTO abonnements (typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![typ, text, amtsgericht, bezirk, match b {
+        "INSERT INTO abonnements (id, typ, text, amtsgericht, bezirk, blatt, aktenzeichen) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![id, typ, text, amtsgericht, bezirk, match b {
             AbonnementInfoBlattNr::Alle => "*".to_string(),
             AbonnementInfoBlattNr::Exakt(i) => i.to_string(),
         }, aktenzeichen.map(|s| s.to_string())],
@@ -2320,7 +2311,7 @@ pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementI
 
     let mut stmt = conn
         .prepare(
-            "SELECT typ, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE text = ?1",
+            "SELECT id, typ, amtsgericht, bezirk, blatt, aktenzeichen FROM abonnements WHERE text = ?1",
         )
         .map_err(|e| format!("Fehler beim Auslesen der Abonnements"))?;
 
@@ -2331,7 +2322,8 @@ pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementI
                 row.get::<usize, String>(1)?,
                 row.get::<usize, String>(2)?,
                 row.get::<usize, String>(3)?,
-                row.get::<usize, Option<String>>(4)?,
+                row.get::<usize, String>(4)?,
+                row.get::<usize, Option<String>>(5)?,
             ))
         })
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
@@ -2339,8 +2331,9 @@ pub fn get_abos_fuer_benutzer(benutzer: &BenutzerInfo) -> Result<Vec<AbonnementI
     let mut bz = Vec::new();
 
     for a in abos {
-        if let Ok((typ, amtsgericht, bezirk, blatt, aktenzeichen)) = a {
+        if let Ok((id, typ, amtsgericht, bezirk, blatt, aktenzeichen)) = a {
             bz.push(AbonnementInfo {
+                id: id, 
                 amtsgericht: amtsgericht.clone(),
                 grundbuchbezirk: bezirk.clone(),
                 blatt: match blatt.as_str() {
@@ -2403,7 +2396,7 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
     let mut bz = Vec::new();
 
     let mut stmt = conn
-    .prepare("SELECT text, aktenzeichen FROM abonnements WHERE typ = ?1 AND amtsgericht = ?2 AND bezirk = ?3")
+    .prepare("SELECT id, text, aktenzeichen FROM abonnements WHERE typ = ?1 AND amtsgericht = ?2 AND bezirk = ?3")
     .map_err(|e| format!("Fehler beim Auslesen der Bezirke"))?;
 
     println!("alle {:?}", &[typ.to_string(), amtsgericht.clone(), bezirk.clone()]);
@@ -2412,7 +2405,8 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
     .query_map(rusqlite::params![typ, amtsgericht, bezirk], |row| {
         Ok((
             row.get::<usize, String>(0)?,
-            row.get::<usize, Option<String>>(1)?,
+            row.get::<usize, String>(1)?,
+            row.get::<usize, Option<String>>(2)?,
         ))
     })
     .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
@@ -2420,8 +2414,9 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
     for a in abos {
         println!("abo {a:?}");
 
-        if let Ok((email, aktenzeichen)) = a {
+        if let Ok((id, email, aktenzeichen)) = a {
             bz.push(AbonnementInfo {
+                id: id, 
                 amtsgericht: amtsgericht.clone(),
                 grundbuchbezirk: bezirk.clone(),
                 blatt: b.clone(),
@@ -2441,71 +2436,16 @@ fn get_abos_inner(typ: &'static str, blatt: &str) -> Result<Vec<AbonnementInfo>,
 
 pub fn delete_abo(
     mount_point: MountPoint,
-    typ: &str,
-    blatt: &str,
-    text: &str,
-    aktenzeichen: Option<&str>,
+    id: &str,
 ) -> Result<(), String> {
-    match typ {
-        "email" | "webhook" => {}
-        _ => {
-            return Err(format!("Ungültiger Abonnement-Typ: {typ}"));
-        }
-    }
-
-    let blatt_split = blatt
-        .split("/")
-        .map(|s| s.trim().to_string())
-        .collect::<Vec<_>>();
-
-    let amtsgericht = match blatt_split.get(0) {
-        Some(s) => s.trim().to_string(),
-        None => {
-            return Err(format!("Kein Amtsgericht angegeben für Abonnement {blatt}"));
-        }
-    };
-
-    let bezirk = match blatt_split.get(1) {
-        Some(s) => s.trim().to_string(),
-        None => {
-            return Err(format!("Kein Bezirk angegeben für Abonnement {blatt}"));
-        }
-    };
-
-    let b = match blatt_split.get(2).map(|s| s.trim()) {
-        Some("*") => AbonnementInfoBlattNr::Alle,
-        Some(s) => AbonnementInfoBlattNr::Exakt(s
-            .trim()
-            .parse::<i32>()
-            .map_err(|e| format!("Ungültige Blatt-Nr. {s}: {e}"))?),
-        None => {
-            return Err(format!("Kein Blatt angegeben für Abonnement {blatt}"));
-        }
-    };
 
     let conn = Connection::open(get_db_path(mount_point))
         .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
 
-    match aktenzeichen.as_ref() {
-        Some(s) => {
-            conn.execute(
-                "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND aktenzeichen = ?5 AND typ = ?6",
-                rusqlite::params![text, amtsgericht, bezirk, match b {
-                    AbonnementInfoBlattNr::Alle => "*".to_string(),
-                    AbonnementInfoBlattNr::Exakt(i) => i.to_string(),
-                }, aktenzeichen, typ],
-            ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
-        }
-        None => {
-            conn.execute(
-                "DELETE FROM abonnements WHERE text = ?1 AND amtsgericht = ?2 AND bezirk = ?3 AND blatt = ?4 AND typ = ?5",
-                rusqlite::params![text, amtsgericht, bezirk, match b {
-                    AbonnementInfoBlattNr::Alle => "*".to_string(),
-                    AbonnementInfoBlattNr::Exakt(i) => i.to_string(),
-                }, typ],
-            ).map_err(|e| format!("Fehler beim Löschen von {blatt} in Abonnements: {e}"))?;
-        }
-    }
+    conn.execute(
+        "DELETE FROM abonnements WHERE id = ?1",
+        rusqlite::params![id],
+    ).map_err(|e| format!("Fehler beim Löschen Abonnement {id}: {e}"))?;
 
     Ok(())
 }

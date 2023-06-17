@@ -82,6 +82,7 @@ pub struct BenutzerInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AbonnementInfo {
+    pub id: String, 
     pub amtsgericht: String,
     pub grundbuchbezirk: String,
     pub blatt: AbonnementInfoBlattNr,
@@ -100,6 +101,13 @@ impl AbonnementInfoBlattNr {
         match self {
             AbonnementInfoBlattNr::Alle => true,
             AbonnementInfoBlattNr::Exakt(i) => i.to_string() == s.trim(),
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            AbonnementInfoBlattNr::Alle => "*".to_string(),
+            AbonnementInfoBlattNr::Exakt(s) => s.to_string(),
         }
     }
 }

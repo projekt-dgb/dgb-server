@@ -516,7 +516,7 @@ pub mod konto {
 
     use crate::{
         api::login::LoginResponse,
-        db::{GpgKeyPair, KontoData, KontoDataResult},
+        db::{GpgKeyPair, KontoData, KontoDataResult, get_abos_fuer_benutzer},
         AppState, BenutzerLoeschenArgs, BenutzerNeuArgsJson, BezirkeLoeschenArgs, BezirkeNeuArgs, models::get_data_dir,
     };
 
@@ -1067,36 +1067,35 @@ pub mod konto {
                 .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
             },
             ("gast", "abo-loeschen") | ("bearbeiter", "abo-loeschen") => {
-                let typ = match data.daten.get(0).map(|s| s.as_str()) {
-                    Some("email") => "email",
-                    Some("webhook") => "webhook",
-                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
-                };
+                let abos = crate::db::get_abos_fuer_benutzer(&benutzer).unwrap_or_default()
+                .into_iter().map(|s| s.id).collect::<std::collections::BTreeSet<_>>();
 
-                println!("data daten {:?}", data.daten);
+                for abo_id in data.daten.iter() {
+                    if !abos.contains(abo_id) {
+                        continue;
+                    }
+                    crate::api::write_to_root_db(
+                        DbChangeOp::AboLoeschen(crate::AboLoeschenArgs {
+                            id: abo_id.clone(),
+                        }),
+                        &app_state,
+                    )
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+                }
             },
             ("admin", "abo-loeschen") => {
-
-                let typ = match data.daten.get(0).map(|s| s.as_str()) {
-                    Some("email") => "email",
-                    Some("webhook") => "webhook",
-                    _ => return Err(KontoJsonPostResponseError { code: 500, text: "Ungültiger Typ for Abonnement".to_string() }),
-                };
-
                 println!("admin abo loeschen {:#?}", data.daten);
-                /* 
-                crate::api::write_to_root_db(
-                    DbChangeOp::AboLoeschen(crate::AboLoeschenArgs {
-                        typ: ,
-                        blatt: ,
-                        text: ,
-                        aktenzeichen: ,
-                    }),
-                    &app_state,
-                )
-                .await
-                .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
-                */
+                for abo_id in data.daten.iter() {
+                    crate::api::write_to_root_db(
+                        DbChangeOp::AboLoeschen(crate::AboLoeschenArgs {
+                            id: abo_id.clone(),
+                        }),
+                        &app_state,
+                    )
+                    .await
+                    .map_err(|e| KontoJsonPostResponseError { code: 500, text: e })?;
+                }
             },
             _ => {
                 return Err(KontoJsonPostResponseError {
@@ -1546,10 +1545,7 @@ pub mod commit {
             ),
             DbChangeOp::AboLoeschen(al) => crate::db::delete_abo(
                 mount_point_write,
-                &al.typ,
-                &al.blatt,
-                &al.text,
-                al.aktenzeichen.as_ref().map(|s| s.as_str()),
+                &al.id,
             ),
             DbChangeOp::CreateZugriff {
                 id,
@@ -2663,7 +2659,7 @@ pub mod abo {
         };
 
         match abo_return {
-            Ok(()) => HttpResponse::Ok().content_type("application/json").body(
+            Ok(s) => HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string_pretty(&AboNeuAnfrage::Ok(AboNeuAnfrageOk {}))
                     .unwrap_or_default(),
             ),
@@ -2671,11 +2667,10 @@ pub mod abo {
         }
     }
 
-    #[get("/abo-loeschen/{email_oder_webhook}/{amtsgericht}/{grundbuchbezirk}/{blatt}")]
+    #[get("/abo-loeschen/{id}")]
     async fn abo_loeschen(
         app_state: web::Data<AppState>,
-        path: web::Path<(String, String, String, usize)>,
-        form: web::Json<AboNeuForm>,
+        path: web::Path<String>,
         req: HttpRequest,
     ) -> impl Responder {
         let response_err = |code: usize, text: String| {
@@ -2696,15 +2691,12 @@ pub mod abo {
                 return e;
             }
         };
-        let (email_oder_webhook, amtsgericht, grundbuchbezirk, blatt) = &*path;
+        let id = &*path;
 
         let abo_return = if app_state.k8s_aktiv() {
             super::write_to_root_db(
                 DbChangeOp::AboLoeschen(AboLoeschenArgs {
-                    typ: email_oder_webhook.clone(),
-                    blatt: format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"),
-                    text: benutzer.email.clone(),
-                    aktenzeichen: form.tag.clone(),
+                    id: id.to_string(),
                 }),
                 &*app_state,
             )
@@ -2712,10 +2704,7 @@ pub mod abo {
         } else {
             crate::db::delete_abo(
                 MountPoint::Local,
-                &email_oder_webhook,
-                &format!("{amtsgericht}/{grundbuchbezirk}/{blatt}"),
-                &benutzer.email,
-                form.tag.as_ref().map(|s| s.as_str()),
+                &id,
             )
         };
         match abo_return {

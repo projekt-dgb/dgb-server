@@ -304,22 +304,9 @@ pub struct AboNeuArgs {
 #[derive(clap::Parser, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[clap(author, version, about, long_about = None)]
 pub struct AboLoeschenArgs {
-    /// Typ des Abonnements ("email" oder "webhook")
+    /// ID des Abonnements ("email" oder "webhook")
     #[clap(short, long)]
-    pub typ: String,
-
-    /// Name des Amtsgerichts / Gemarkung / Blatts des Abos,
-    /// getrennt mit Schrägstrich ("Prenzlau / Ludwigsburg / 254 ")
-    #[clap(short, long)]
-    pub blatt: String,
-
-    /// Name der E-Mail / Webhooks, für die das Abo eingetragen ist
-    #[clap(short, long)]
-    pub text: String,
-
-    /// Aktenzeichen des Abonnements
-    #[clap(short, long)]
-    pub aktenzeichen: Option<String>,
+    pub id: String,
 }
 
 pub fn process_action(action: &ArgAction) -> Result<(), String> {

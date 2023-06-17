@@ -65,8 +65,7 @@ Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
   entsprechede Webhook aktiviert bzw. eine E-Mail gesendet
     - `POST /abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
     - `POST /abo-neu/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
-    - `POST /abo-loeschen/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
-    - `POST /abo-loeschen/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+    - `POST /abo-loeschen/{id}`
 
 ### Suche
 
@@ -183,10 +182,11 @@ Authorization: Bearer S0VLU0UhIExFQ0tFUiEK
 
 Legt ein neues E-Mail-Abonnement für den Benutzer an (`aktenzeichen` ist optional)
 
-URL: POST `/abo-neu/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+URL: POST `/abo-neu/{typ}/{amtsgericht}/{grundbuchbezirk}/{blatt}`
 
 FORM: 
 
+    - `typ`: Typ des Abonnements, `email` oder `webhook`
     - `aktenzeichen`: Optional[String]: Aktenzeichen, was auf Benachrichtigungen bei 
       Grundbuchänderungen an diesem Blatt später bei "Ihr Zeichen" / "Unser Zeichen" 
       auftauchen wird.
@@ -202,11 +202,11 @@ Wenn das Grundbuchblatt jetzt geändert wird, wird der Benutzer, welcher die Anf
 gestellt hat, eine E-Mail mit Hinweis auf die Änderung erhalten, mit dem Hinweis auf
 das Aktenzeichen "ABC DEF".
 
-#### EMail-Abonnement neu anlegen: Ok
+#### Abonnement neu anlegen: Ok
 
 - `status`: String: immer `"ok"`
 
-#### EMail-Abonnement neu anlegen: Fehler
+#### Abonnement neu anlegen: Fehler
 
 - `status`: String: immer `"error"`
 - `code`: Integer: Fehlercode
@@ -214,11 +214,11 @@ das Aktenzeichen "ABC DEF".
     - 500: Interner Fehler
 - `text`: String: Fehlermeldung vorformatiert als Text
 
-### EMail-Abonnement löschen
+### Abonnement löschen
 
 Funktioniert genau wie "EMail-Abonnement anlegen", siehe oben
 
-URL: POST `/abo-loeschen/email/{amtsgericht}/{grundbuchbezirk}/{blatt}`
+URL: POST `/abo-loeschen/{id}`
 
 ### Webhook neu anlegen
 
@@ -283,24 +283,6 @@ Content-Type: application/json
     "aenderungs_id": "c913905482d2d22befe3e0f85e93795cf8a998cc"
 }
 ```
-
-### Webhook löschen
-
-Funktioniert genau wie "Webhook anlegen", siehe oben
-
-URL: POST `/abo-loeschen/webhook/{amtsgericht}/{grundbuchbezirk}/{blatt}`
-
-#### Webhook löschen: Ok
-
-- `status`: String: immer `"ok"`
-
-####  Webhook löschen: Fehler
-
-- `status`: String: immer `"error"`
-- `code`: Integer: FehlercodeFORM: 
-    - 0: Benutzer nicht gefunden
-    - 500: Interner Fehler
-- `text`: String: Fehlermeldung vorformatiert als Text
 
 ### Upload
 

@@ -197,6 +197,7 @@ pub fn send_zugriff_abgelehnt_email(to: &str) -> Result<(), String> {
 
 pub fn send_change_email(abo: &AbonnementInfo, commit_id: &str) -> Result<(), String> {
     let AbonnementInfo {
+        id,
         amtsgericht,
         blatt,
         text,
@@ -211,12 +212,6 @@ pub fn send_change_email(abo: &AbonnementInfo, commit_id: &str) -> Result<(), St
     let aktenzeichen = aktenzeichen.clone().unwrap_or_default(); // TODO
     let email = text;
     let email_url = urlencoding::encode(text);
-    let amtsgericht_url = urlencoding::encode(amtsgericht);
-    let grundbuchbezirk_url = urlencoding::encode(grundbuchbezirk);
-    let aktenzeichen_url = match aktenzeichen {
-        None => String::new(),
-        Some(s) => urlencoding::encode(&aktenzeichen), // aktenzeichen_url
-    };
     let server_url = crate::db::get_server_address(MountPoint::Local)?;
 
     let html = format!("<!DOCTYPE html>
@@ -245,7 +240,7 @@ pub fn send_change_email(abo: &AbonnementInfo, commit_id: &str) -> Result<(), St
             <br/>
             
             <p>Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.</p>
-            <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/email/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}?email={email_url}{aktenzeichen_url}\">hier</a>.</p>
+            <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/{id}\">hier</a>.</p>
         </div>
     </body>
     </html>");
@@ -265,10 +260,8 @@ Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgend
 
 Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.
 Um das Abonnement zu kündigen, klicken Sie bitte hier:
-{server_url}/abo-loeschen/{amtsgericht_url}/{grundbuchbezirk_url}/{blatt}/{aktenzeichen_url}?email={email_url}_url&commit={commit_id}
+{server_url}/abo-loeschen/{id}
     ");
-
-    let amtsgericht_url_lower = amtsgericht_url.to_lowercase();
 
     let to = email;
 

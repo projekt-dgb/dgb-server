@@ -129,6 +129,15 @@ function changeSection(target) {
     updateFilter();
 }
 
+function changeSectionMobile(event) {
+    active_sidebar = parseInt(event.target.value);
+    selected = [];
+    filter_by = null;
+    renderSidebar();
+    renderMainTable();
+    updateFilter();
+}
+
 function addToSelection(target) {
     if (!target) {
         return;
@@ -303,6 +312,7 @@ function renderHeader(id) {
 function renderSidebar() {
 
     document.getElementById("sidebar").innerHTML = '';
+    document.getElementById("select-section-mobile").innerHTML = '';
 
     for (var index = 0; index < sidebar_items.length; index++) {
         var element = sidebar_items[index];
@@ -322,7 +332,17 @@ function renderSidebar() {
 
         var textnode = document.createTextNode(element);
         node.appendChild(textnode);
-        document.getElementById("sidebar").appendChild(node);    
+        document.getElementById("sidebar").appendChild(node);   
+        
+        var mobileNode = document.createElement("option");
+        var textnode = document.createTextNode(element);
+        mobileNode.value = "" + index;
+        mobileNode.appendChild(textnode);
+        if (active_sidebar == index) {
+            mobileNode.selected = "true";
+        }
+
+        document.getElementById("select-section-mobile").appendChild(mobileNode);
     }
 
     document.getElementById("sidebar").appendChild(document.createElement("br"));    
@@ -434,6 +454,7 @@ function renderRows(id) {
 
             var cell_text = document.createElement("a");
             var textnode1 = document.createTextNode(aenderung_id.substr(0, 6));
+            cell_text.style.fontFamily = "monospace";
             cell_text.style.textDecoration = "underline";
             cell_text.href = "/aenderung/pdf/" + aenderung_id;
             cell_text.target = "_blank";
@@ -933,12 +954,13 @@ function renderRows(id) {
 
             row_node.appendChild(non_check_node);
         } else if (id == "abonnements") {
-            var typ = row[0];
-            var text = row[1];
-            var amtsgericht = row[2];
-            var bezirk = row[3];
-            var blatt = row[4];
-            var aktenzeichen = row[5];
+            var abo_id = row[0];
+            var typ = row[1];
+            var text = row[2];
+            var amtsgericht = row[3];
+            var bezirk = row[4];
+            var blatt = row[5];
+            var aktenzeichen = row[6];
 
             var check_uncheck_all_node_div = document.createElement("div");
             check_uncheck_all_node_div.style.flexDirection = "column";
@@ -949,8 +971,8 @@ function renderRows(id) {
             var check_node = document.createElement("input");
             check_node.type = "checkbox";
             check_node.style.minWidth = "15px";
-            check_node.dataset.id = e;
-            check_node.checked = selected.includes(e);
+            check_node.dataset.id = abo_id;
+            check_node.checked = selected.includes(abo_id);
             check_node.addEventListener('change', function(event) {
                 if (event.currentTarget.checked) {
                     addToSelection(event.currentTarget);
@@ -1123,7 +1145,7 @@ function renderActions(id) {
 
         var loeschen = document.createElement("button");
         loeschen.textContent = "Ausgewählte Abonnements beenden";
-        loeschen.onclick = function(){ aboBeenden(); };
+        loeschen.onclick = function(){ aboLoeschen(); };
         actions_data.appendChild(loeschen);
     }
     return actions_data;
