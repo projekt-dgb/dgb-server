@@ -78,7 +78,7 @@ ul li {
     list-style-type: none;
 }
 
-@media screen and (max-width: 900px) {
+@media (max-width: 900px) {
     body {
         font-size: 1.2em;
         margin: 0;
@@ -187,7 +187,6 @@ h1 {
 h2 {
     font-size: 1em;
     padding-bottom: 50px;
-    max-width: 400px;
 }
 
 hr {

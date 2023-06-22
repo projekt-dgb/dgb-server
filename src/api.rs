@@ -2414,18 +2414,65 @@ pub mod download {
             }
         };
 
-        let pdf_bytes = generate_diff(&path);
-
-        HttpResponse::Ok()
-            .content_type("application/pdf")
-            .body(pdf_bytes)
+        match generate_diff(&path) {
+            Ok(o) => {
+                HttpResponse::Ok()
+                .content_type("application/pdf")
+                .body(pdf_bytes)
+            },
+            Err(e) => {
+                HttpResponse::Ok()
+                .content_type("application/json")
+                .body(serde_json::to_string_pretty(&PdfFileOrEmpty::NichtVorhanden(
+                    PdfFileNichtVorhanden {
+                        code: 404,
+                        text: e,
+                    },
+                )).unwrap_or_default())
+            }
+        }
     }
 
-    fn generate_diff(id: &str) -> Vec<u8> {
+    fn generate_diff(id: &str) -> Result<Vec<u8>, String> {
         use printpdf::{Mm, PdfDocument};
-        let titel = format!("Diff with ID {id}");
-        let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Titelblatt");
+
+        let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
+        if !local_path.exists() {
+            let _ = std::fs::create_dir(local_path.clone());
+        }
+
+        let repo = match Repository::open(&local_path) {
+            Ok(o) => o,
+            Err(_) => {
+                Repository::init(&local_path).map_err(|e| format!("{e}"))?
+            }
+        };
+
+        let oid = Oid::from_str(id).map_err(|_| format!("Ungültiger Commit {id}"))?;
+        let commit = repo.find_commit(oid).map_err(|_| format!("Ungültiger Commit {id}"))?;
+        let titel = format!("Grundbuchänderung {id}");
+        let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Grundbuchänderungsmitteilung");
+        let fonts = PdfFonts::new(&mut doc);
+        let id_short = id.chars().take(8).collect::<String>();
+        let datum = convert_git2_time_to_chrono(commit.time()).map(|e| e.to_rfc3339().to_string()).unwrap_or_default();
+
+        // text, font size, x from left edge, y from bottom edge, font
+        let start = Mm(297.0 / 2.0);
+        let rand_x = Mm(25.0);
+        current_layer.use_text(&format!("Grundbuchänderung {id_short} vom {datum}"), 22.0, Mm(25.0), start, &fonts.times_bold);
+
         doc.save_to_bytes().unwrap_or_default()
+    }
+
+    fn convert_git2_time_to_chrono(time: &git2::Time) -> Option<DateTime<Utc>> {
+        let timestamp = time.seconds();
+        let offset = time.offset_minutes();
+        let tz = match time.sign() {
+            '-' => FixedOffset::west_opt(offset).ok()?,
+            _ => FixedOffset::east_opt(offset).ok()?,
+        };
+        let dt = chrono::NaiveDateTime::from_timestamp_opt(timestamp, 0)?.and_local_timezone(tz).ok()?.and_utc();
+        Some(dt)
     }
 
     pub fn generate_pdf(gb: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<u8> {
