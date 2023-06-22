@@ -529,9 +529,10 @@ pub mod konto {
     #[get("/konto")]
     async fn konto_get(req: HttpRequest, zugriff: web::Query<ZugriffId>) -> impl Responder {
 
+        let user = super::get_benutzer_from_httpauth(&req).await;
+
         if let Some(s) = zugriff.id.as_ref() {
-            let user = super::get_benutzer_from_httpauth(&req).await;
-            let benutzer_existiert = benutzer_exists(zugriff.id.as_deref()).await.is_some();
+            let benutzer_existiert = benutzer_exists(zugriff.id.as_deref()).is_some();
             if user.is_err() && !benutzer_existiert {
                 let html = include_str!("../web/konto-login.html").replace(
                     "<!-- CSS -->",
@@ -544,7 +545,7 @@ pub mod konto {
             }
         }
 
-        let (token, benutzer) = match  {
+        let (token, benutzer) = match user {
             Ok(o) => o,
             Err(_) => {
                 return HttpResponse::Found()
@@ -582,7 +583,7 @@ pub mod konto {
 
     fn benutzer_exists(s: Option<&str>) -> Option<()> {
         let zugriff = s?;
-        if crate::db::zugriff_benutzer_exists(s).ok()? {
+        if crate::db::zugriff_benutzer_exists(zugriff).ok()? {
             Some(())
         } else {
             None

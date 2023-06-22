@@ -1944,10 +1944,10 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
     let mut result = BTreeSet::new();
 
     for (land, amtsgericht, bezirk, blatt) in grundbuchblaetter {
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l == land || l == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag == amtsgericht || ag == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz == bezirk || ag == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b == blatt || b == "ALLE_BLAETTER").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l.as_str() == land.as_str() || l.as_str() == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag.as_str() == amtsgericht.as_str() || ag.as_str() == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz.as_str() == bezirk.as_str() || ag.as_str() == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b.as_str() == blatt.as_str() || b.as_str() == "ALLE_BLAETTER").collect::<Vec<_>>();
         if !zugriffe.is_empty() {
             result.insert((land, amtsgericht, bezirk, blatt));
         }
