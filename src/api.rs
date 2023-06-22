@@ -2453,28 +2453,27 @@ pub mod download {
         let oid = Oid::from_str(id).map_err(|_| format!("Ungültiger Commit {id}"))?;
         let commit = repo.find_commit(oid).map_err(|_| format!("Ungültiger Commit {id}"))?;
         let titel = format!("Grundbuchänderung {id}");
-        let (mut doc, page1, current_layer) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Grundbuchänderungsmitteilung");
+        let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Grundbuchänderungsmitteilung");
         let fonts = PdfFonts::new(&mut doc);
         let id_short = id.chars().take(8).collect::<String>();
-        let datum = convert_git2_time_to_chrono(commit.time()).map(|e| e.to_rfc3339().to_string()).unwrap_or_default();
+        let datum = convert_git2_time_to_chrono(&commit.time()).map(|e| e.to_rfc3339().to_string()).unwrap_or_default();
 
         // text, font size, x from left edge, y from bottom edge, font
         let start = Mm(297.0 / 2.0);
         let rand_x = Mm(25.0);
-        current_layer.use_text(&format!("Grundbuchänderung {id_short} vom {datum}"), 22.0, Mm(25.0), start, &fonts.times_bold);
+        doc.get_page(page1).get_layer(layer1).use_text(&format!("Grundbuchänderung {id_short} vom {datum}"), 22.0, Mm(25.0), start, &fonts.times_bold);
 
         Ok(doc.save_to_bytes().unwrap_or_default())
     }
 
-    fn convert_git2_time_to_chrono(time: &git2::Time) -> Option<chrono::DateTime<chrono::Utc>> {
+    fn convert_git2_time_to_chrono(time: &git2::Time) -> Option<chrono::DateTime<chrono::FixedOffset>> {
         let timestamp = time.seconds();
         let offset = time.offset_minutes();
         let tz = match time.sign() {
-            '-' => chrono::FixedOffset::west_opt(offset).ok()?,
-            _ => chrono::FixedOffset::east_opt(offset).ok()?,
+            '-' => chrono::FixedOffset::west_opt(offset)?,
+            _ => chrono::FixedOffset::east_opt(offset)?,
         };
-        let dt = chrono::NaiveDateTime::from_timestamp_opt(timestamp, 0)?.and_local_timezone(tz).latest()?.and_utc();
-        Some(dt)
+        chrono::NaiveDateTime::from_timestamp_opt(timestamp, 0)?.and_local_timezone(tz).latest()
     }
 
     pub fn generate_pdf(gb: &Grundbuch, options: &PdfGrundbuchOptions) -> Vec<u8> {

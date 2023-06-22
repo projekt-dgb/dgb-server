@@ -83,10 +83,10 @@ pub struct PdfGrundbuchOptions {
 }
 
 pub struct PdfFonts {
-    times: IndirectFontRef,
-    times_bold: IndirectFontRef,
-    courier_bold: IndirectFontRef,
-    helvetica: IndirectFontRef,
+    pub times: IndirectFontRef,
+    pub times_bold: IndirectFontRef,
+    pub courier_bold: IndirectFontRef,
+    pub helvetica: IndirectFontRef,
 }
 
 impl PdfFonts {

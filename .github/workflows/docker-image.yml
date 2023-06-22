@@ -10,6 +10,42 @@ on:
       release:
           description: 'Make release'
 jobs:
+  check:
+    name: Build on ${{ matrix.build }}
+    runs-on: ${{ matrix.os }}
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: macos-x64
+            os: macos-11
+            artifact_name: 'dgb-server-darwin-amd64'
+            artifact_path: target/release/dgb-server
+          - build: linux-x64
+            os: ubuntu-22.04
+            artifact_name: 'dgb-server-linux-amd64'
+            artifact_path: target/release/dgb-server
+          - build: windows-x64
+            os: windows-2019
+            artifact_name: 'dgb-server-windows-amd64'
+            artifact_path: target/release/dgb-server.exe
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.69
+      - name: Build Linux
+        shell: bash
+        run: cargo build --release
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_path }}
+          retention-days: 2
+
   build:
     runs-on: ubuntu-latest
     steps:
