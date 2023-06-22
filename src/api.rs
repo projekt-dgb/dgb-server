@@ -528,64 +528,64 @@ pub mod konto {
     // Konto-Seite
     #[get("/konto")]
     async fn konto_get(req: HttpRequest, zugriff: web::Query<ZugriffId>) -> impl Responder {
-        match zugriff.id.as_ref() {
-            Some(s) => {
-                /*
-                let benutzer = match super::get_benutzer_from_httpauth(&req).await {
-                    Ok(o) => o,
-                    Err(_) => {
-                        return HttpResponse::Found()
-                            .append_header(("Location", "/login"))
-                            .finish();
-                    }
-                };
-                */
 
+        if let Some(s) = zugriff.id.as_ref() {
+            let user = super::get_benutzer_from_httpauth(&req).await;
+            let benutzer_existiert = benutzer_exists(zugriff.id.as_deref()).await.is_some();
+            if user.is_err() && !benutzer_existiert {
                 let html = include_str!("../web/konto-login.html").replace(
                     "<!-- CSS -->",
                     &format!("<style>{}</style>", crate::get_css()),
                 );
 
-                HttpResponse::Ok()
+                return HttpResponse::Ok()
                     .content_type("text/html; charset=utf-8")
-                    .body(html)
+                    .body(html);
             }
-            None => {
-                let (token, benutzer) = match super::get_benutzer_from_httpauth(&req).await {
-                    Ok(o) => o,
-                    Err(_) => {
-                        return HttpResponse::Found()
-                            .append_header(("Location", "/login"))
-                            .finish();
-                    }
-                };
+        }
 
-                let konto_data = match crate::db::get_konto_data(&benutzer) {
-                    Ok(KontoDataResult::Aktiviert(a)) => a,
-                    _ => KontoData::default(),
-                };
-
-                let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
-
-                let html = include_str!("../web/konto.html")
-                    .replace(
-                        "<!-- CSS -->",
-                        &format!("<style>{}</style>", crate::get_css()),
-                    )
-                    .replace(
-                        "data-konto-daten=\"{}\"",
-                        &format!("data-konto-daten=\'{}\'", konto_data_json),
-                    )
-                    .replace(
-                        "data-token-id=\"\"",
-                        &format!("data-token-id=\"{}\"", token),
-                    )
-                    .replace("// KONTO_JS_SCRIPT", include_str!("../web/konto.js"));
-
-                HttpResponse::Ok()
-                    .content_type("text/html; charset=utf-8")
-                    .body(html)
+        let (token, benutzer) = match  {
+            Ok(o) => o,
+            Err(_) => {
+                return HttpResponse::Found()
+                    .append_header(("Location", "/login"))
+                    .finish();
             }
+        };
+
+        let konto_data = match crate::db::get_konto_data(&benutzer) {
+            Ok(KontoDataResult::Aktiviert(a)) => a,
+            _ => KontoData::default(),
+        };
+
+        let konto_data_json = serde_json::to_string(&konto_data).unwrap_or_default();
+
+        let html = include_str!("../web/konto.html")
+            .replace(
+                "<!-- CSS -->",
+                &format!("<style>{}</style>", crate::get_css()),
+            )
+            .replace(
+                "data-konto-daten=\"{}\"",
+                &format!("data-konto-daten=\'{}\'", konto_data_json),
+            )
+            .replace(
+                "data-token-id=\"\"",
+                &format!("data-token-id=\"{}\"", token),
+            )
+            .replace("// KONTO_JS_SCRIPT", include_str!("../web/konto.js"));
+
+        HttpResponse::Ok()
+            .content_type("text/html; charset=utf-8")
+            .body(html)
+    }
+
+    fn benutzer_exists(s: Option<&str>) -> Option<()> {
+        let zugriff = s?;
+        if crate::db::zugriff_benutzer_exists(s).ok()? {
+            Some(())
+        } else {
+            None
         }
     }
 
@@ -2452,16 +2452,16 @@ pub mod download {
 
         let oid = Oid::from_str(id).map_err(|_| format!("Ungültiger Commit {id}"))?;
         let commit = repo.find_commit(oid).map_err(|_| format!("Ungültiger Commit {id}"))?;
-        let titel = format!("Grundbuchänderung {id}");
+        let id_short = id.chars().take(8).collect::<String>();
+        let titel = format!("Grundbuchaenderung {id}");
         let (mut doc, page1, layer1) = PdfDocument::new(&titel, Mm(210.0), Mm(297.0), "Grundbuchänderungsmitteilung");
         let fonts = PdfFonts::new(&mut doc);
-        let id_short = id.chars().take(8).collect::<String>();
         let datum = convert_git2_time_to_chrono(&commit.time()).map(|e| e.to_rfc3339().to_string()).unwrap_or_default();
 
         // text, font size, x from left edge, y from bottom edge, font
         let start = Mm(297.0 / 2.0);
         let rand_x = Mm(25.0);
-        doc.get_page(page1).get_layer(layer1).use_text(&format!("Grundbuchänderung {id_short} vom {datum}"), 22.0, Mm(25.0), start, &fonts.times_bold);
+        doc.get_page(page1).get_layer(layer1).use_text(&format!("Grundbuchänderung {id_short} vom {datum}"), 22.0, Mm(25.0), start, &fonts.helvetica);
 
         Ok(doc.save_to_bytes().unwrap_or_default())
     }

@@ -1437,6 +1437,8 @@ pub fn get_konto_data(benutzer_info: &BenutzerInfo) -> Result<KontoDataResult, S
                 crate::db::get_verfuegbare_grundbuecher_fuer_benutzer(&benutzer_info)
                     .unwrap_or_default();
 
+            println!("verfügbare grundbücher bearbeiter = {:?}", verfuegbare_grundbuecher);
+
             data.data.insert(
                 "blaetter".to_string(),
                 KontoTabelle {
@@ -1785,13 +1787,17 @@ pub fn zugriff_genehmigen(
             )
             .map_err(|e| format!("{e}"))?;
 
+        println!("query benutzer count email = {:?}", email);
+
         let query_benutzer_count: i32 = conn
             .query_row(
-                "SELECT COUNT(*) FROM benutzer WHERE email = ?1",
+                "SELECT COUNT (*) FROM benutzer WHERE email = ?1",
                 rusqlite::params![email],
                 |row| row.get(0),
             )
             .map_err(|e| format!("{e}"))?;
+
+        println!("query_benutzer_count = {:?}", query_benutzer_count);
 
         if query_benutzer_count == 0 {
             benutzer_neu.push((name, email, typ));
@@ -1900,6 +1906,8 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("{e}"))?;
 
+    println!("alle grundbuecher: {:?}", grundbuchblaetter);
+
     if grundbuchblaetter.is_empty() {
         return Ok(Vec::new());
     }
@@ -1927,17 +1935,25 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("{e}"))?;
 
+    println!("zugriffe = {:?}", zugriffe);
+
     if zugriffe.is_empty() {
         return Ok(Vec::new());
     }
 
-    let zugriffe = zugriffe.into_iter().collect::<BTreeSet<_>>();
-    let result = grundbuchblaetter
-        .intersection(&zugriffe)
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut result = BTreeSet::new();
 
-    Ok(result)
+    for (land, amtsgericht, bezirk, blatt) in grundbuchblaetter {
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l == land || l == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag == amtsgericht || ag == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz == bezirk || ag == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
+        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b == blatt || b == "ALLE_BLAETTER").collect::<Vec<_>>();
+        if !zugriffe.is_empty() {
+            result.insert((land, amtsgericht, bezirk, blatt));
+        }
+    }
+
+    Ok(result.into_iter().collect())
 }
 
 pub fn get_benutzer_grouped_by_zugriff(

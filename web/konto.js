@@ -94,9 +94,9 @@ function getActiveSectionName() {
         }
     } else if (kontotyp == "bearbeiter") {
         if (active_sidebar == 0) {
-            return "aenderungen";
-        } else if (active_sidebar == 1) {
             return "blaetter";
+        } else if (active_sidebar == 1) {
+            return "aenderungen";
         } else if (active_sidebar == 2) {
             return "abonnements";
         }  else if (active_sidebar == 3) {
@@ -1258,7 +1258,7 @@ function aboNeu() {
     } else {
         text = "";
     }
-    if (!text) { return; }
+    if (kontotyp == "admin" && !text) { return; }
     
     var amtsgericht = window.prompt("Amtsgericht", "");
     if (!amtsgericht) { return; }

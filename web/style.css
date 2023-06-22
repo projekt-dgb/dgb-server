@@ -149,6 +149,17 @@ button.block-btn:after, a.block-btn:after {
     transition: all .35s;
 }
 
+@media (max-width: 900px) {
+    button.block-tn, a.block-btn {
+        font-size: 25px;
+        height: 30px;
+        line-height: 30px;
+    }
+    .content.main-page {
+        max-width: none;
+    }
+}
+
 .deco-rect {
     z-index: 0;
     position: absolute;
