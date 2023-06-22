@@ -239,7 +239,7 @@ pub fn send_change_email(abo: &AbonnementInfo, commit_id: &str) -> Result<(), St
             <a href=\"{server_url}/aenderung/pdf/{commit_id}\">{server_url}/aenderung/pdf/{commit_id}</a>
             <br/>
             
-            <p>Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.</p>
+            <p>Sie wurden benachrichtigt, da Sie diese Grundbuchblätter abonniert haben.</p>
             <p>Um das Abonnement zu kündigen, klicken Sie bitte <a href=\"{server_url}/abo-loeschen/{id}\">hier</a>.</p>
         </div>
     </body>
@@ -258,7 +258,7 @@ Um die volle Grundbuchänderung in PDF-Form einzusehen, folgen Sie bitten dem fo
 Um die Grundbuchänderung in Code-Form einzusehen, folgen Sie bitten dem folgenden Link:
 {server_url}/aenderung/diff/{commit_id}?email={email_url}
 
-Sie wurden benachrichtigt, da Sie diese Grundbuchblatt abonniert haben.
+Sie wurden benachrichtigt, da Sie diese Grundbuchblätter abonniert haben.
 Um das Abonnement zu kündigen, klicken Sie bitte hier:
 {server_url}/abo-loeschen/{id}
     ");
