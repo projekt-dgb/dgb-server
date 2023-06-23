@@ -1247,9 +1247,6 @@ pub mod commit {
 
         println!("commit_internal");
 
-        let upload_changeset = &*upload_changeset;
-        let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
-
         let response_err = |code: usize, text: String| {
             HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string_pretty(&CommitResponse::StatusError(CommitResponseError {
@@ -1267,6 +1264,14 @@ pub mod commit {
             )
         };
 
+        let upload_changeset = &*upload_changeset;
+        let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
+        let zugriffe = crate::db::get_zugriffe(&benutzer).unwrap_or_default();
+        let hat_schreibzugriff = benutzer.rechte == "admin" || benutzer.rechte == "bearbeiter";
+        if !hat_schreibzugriff {
+            return Err(response_err(501, format!("Benutzer hat keine Schreibrechte")));
+        }
+
         verify_signature(&benutzer.email, &upload_changeset).map_err(|e| {
             response_err(
                 501,
@@ -1276,7 +1281,7 @@ pub mod commit {
 
         if app_state.k8s_aktiv() && app_state.sync_server() {
             let remote_path = Path::new(&get_data_dir(MountPoint::Remote)).to_path_buf();
-            sync_changes_to_disk(&upload_changeset, &remote_path)?;
+            sync_changes_to_disk(&zugriffe, &upload_changeset, &remote_path)?;
             commit_changes(&app_state, &remote_path, &benutzer, &upload_changeset)
                 .await
                 .map_err(|e| {
@@ -1334,7 +1339,7 @@ pub mod commit {
         } else {
             println!("local...");
             let local_path = Path::new(&get_data_dir(MountPoint::Local)).to_path_buf();
-            sync_changes_to_disk(&upload_changeset, &local_path)?;
+            sync_changes_to_disk(&zugriffe, &upload_changeset, &local_path)?;
             println!("changes synced!");
             let _ = commit_changes(&app_state, &local_path, &benutzer, &upload_changeset).await;
             println!("committed!");
@@ -1355,7 +1360,6 @@ pub mod commit {
         ).map_err(|e| response_err(500, format!("{e}")))?;
 
         let gemarkungsbezirke = crate::db::get_gemarkungen().unwrap_or_default();
-
         println!("inserting grundbuchblätter {:#?}", upload_changeset.data.neu);
 
         for neu in upload_changeset.data.neu.iter() {
@@ -1373,12 +1377,20 @@ pub mod commit {
                 None => continue,
             };
 
+            let amtsgericht = neu.analysiert.titelblatt.amtsgericht.to_string();
+            let bezirk = neu.analysiert.titelblatt.grundbuch_von.to_string();
+            let blatt = neu.analysiert.titelblatt.blatt.to_string();
+
             println!("insert into grundbuecher {:#?}", &[
                 land.to_string(),
-                neu.analysiert.titelblatt.amtsgericht.to_string(),
-                neu.analysiert.titelblatt.grundbuch_von.to_string(),
-                neu.analysiert.titelblatt.blatt.to_string(),
+                amtsgericht,
+                bezirk,
+                blatt,
             ]);
+
+            if !crate::db::benutzer_hat_zugriff_auf_blatt(&zugriffe, &land, &amtsgericht, &bezirk, &blatt) {
+                return response_err(500, format!("Kein Zugriff auf Blatt {land}/{amtsgericht}/{bezirk}/{blatt}"));
+            }
 
             let _ = stmt.execute(rusqlite::params![
                 land.to_string(),
@@ -1835,9 +1847,6 @@ pub mod upload {
         app_state: &AppState,
         req: &HttpRequest,
     ) -> Result<HttpResponse, HttpResponse> {
-        let upload_changeset = &*upload_changeset;
-        let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
-
         let response_err = |code: usize, text: String| {
             HttpResponse::Ok().content_type("application/json").body(
                 serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
@@ -1858,6 +1867,13 @@ pub mod upload {
                 .unwrap_or_default(),
             )
         };
+
+        let upload_changeset = &*upload_changeset;
+        let (token, benutzer) = super::get_benutzer_from_httpauth(&req).await?;
+        let hat_schreibzugriff = benutzer.rechte == "admin" || benutzer.rechte == "bearbeiter";
+        if !hat_schreibzugriff {
+            return Err(response_err(501, format!("Benutzer hat keine Schreibrechte")));
+        }
 
         verify_signature(&benutzer.email, &upload_changeset).map_err(|e| {
             response_err(
@@ -1953,6 +1969,7 @@ pub mod upload {
     }
 
     pub fn sync_changes_to_disk(
+        zugriffe: &[(String, String, String, String)],
         upload_changeset: &UploadChangeset,
         folder_path: &PathBuf,
     ) -> Result<(), HttpResponse> {
@@ -1964,12 +1981,28 @@ pub mod upload {
             upload_changeset.data.geaendert.len()
         );
 
+        let response_err = |code: usize, text: String| {
+            HttpResponse::Ok().content_type("application/json").body(
+                serde_json::to_string_pretty(&UploadChangesetResponse::StatusError(
+                    UploadChangesetResponseError {
+                        code: code,
+                        text: text,
+                    },
+                ))
+                .unwrap_or_default(),
+            )
+        };
+
         for neu in upload_changeset.data.neu.iter() {
             let amtsgericht = &neu.analysiert.titelblatt.amtsgericht;
             let grundbuch = &neu.analysiert.titelblatt.grundbuch_von;
             let land = get_land(&gemarkungen, &amtsgericht, &grundbuch)?;
-
             let blatt = neu.analysiert.titelblatt.blatt.clone();
+
+            if !crate::db::benutzer_hat_zugriff_auf_blatt(zugriffe, &land, &amtsgericht, &grundbuch, &blatt) {
+                return Err(response_err(500, format!("Keine Schreibrechte für Blatt {land}/{amtsgericht}/{grundbuch}/{blatt}")));
+            }
+
             let target_path = folder_path
                 .clone()
                 .join(land.clone())
@@ -1985,7 +2018,6 @@ pub mod upload {
                 .join(grundbuch);
 
             let _ = std::fs::create_dir_all(&target_folder);
-            println!("writing to {}", target_path.display());
             let _ = std::fs::write(target_path, target_json.as_bytes());
         }
 
@@ -1993,8 +2025,12 @@ pub mod upload {
             let amtsgericht = &geaendert.neu.analysiert.titelblatt.amtsgericht;
             let grundbuch = &geaendert.neu.analysiert.titelblatt.grundbuch_von;
             let land = get_land(&gemarkungen, &amtsgericht, &grundbuch)?;
-
             let blatt = geaendert.neu.analysiert.titelblatt.blatt.clone();
+
+            if !crate::db::benutzer_hat_zugriff_auf_blatt(zugriffe, &land, &amtsgericht, &grundbuch, &blatt) {
+                return Err(response_err(500, format!("Keine Schreibrechte für Blatt {land}/{amtsgericht}/{grundbuch}/{blatt}")));
+            }
+
             let target_path = folder_path
                 .clone()
                 .join(land.clone())

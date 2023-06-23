@@ -1878,6 +1878,40 @@ pub fn get_email_abonnements_fuer_benutzer(
     Ok(abos)
 }
 
+pub fn get_zugriffe(benutzer: &BenutzerInfo) -> Result<Vec<(String, String, String, String)>, String> {
+
+    let conn = Connection::open(get_db_path(MountPoint::Local))
+        .map_err(|e| format!("Fehler bei Verbindung zur Benutzerdatenbank"))?;
+
+    let mut stmt = conn
+        .prepare("SELECT land, amtsgericht, bezirk, blatt FROM zugriffe WHERE email = ?1 AND gewaehrt_von IS NOT NULL")
+        .map_err(|e| format!("{e}"))?;
+
+    let zugriffe = stmt
+        .query_map(rusqlite::params![benutzer.email], |r| {
+            Ok((
+                r.get::<usize, String>(0)?,
+                r.get::<usize, String>(1)?,
+                r.get::<usize, String>(2)?,
+                r.get::<usize, String>(3)?,
+            ))
+        })
+        .map_err(|e| format!("{e}"))?
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{e}"))?;
+
+    Ok(zugriffe)
+}
+
+pub fn benutzer_hat_zugriff_auf_blatt(zugriffe: &[(String, String, String, String)], land: &str, amtsgericht: &str, bezirk: &str, blatt: &str) -> bool {
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l.as_str() == land.as_str() || l.as_str() == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag.as_str() == amtsgericht.as_str() || ag.as_str() == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz.as_str() == bezirk.as_str() || bz.as_str() == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b.as_str() == blatt.as_str() || b.as_str() == "ALLE_BLAETTER").collect::<Vec<_>>();
+    if !zugriffe.is_empty() { true } else { false }
+}
+
 /// (Bundesland, Amtsgericht, Bezirk, Blatt)
 pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
     benutzer: &BenutzerInfo,
@@ -1917,23 +1951,7 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
         return Ok(grundbuchblaetter.into_iter().collect::<Vec<_>>());
     }
 
-    let mut stmt = conn
-        .prepare("SELECT land, amtsgericht, bezirk, blatt FROM zugriffe WHERE email = ?1")
-        .map_err(|e| format!("{e}"))?;
-
-    let zugriffe = stmt
-        .query_map(rusqlite::params![benutzer.email], |r| {
-            Ok((
-                r.get::<usize, String>(0)?,
-                r.get::<usize, String>(1)?,
-                r.get::<usize, String>(2)?,
-                r.get::<usize, String>(3)?,
-            ))
-        })
-        .map_err(|e| format!("{e}"))?
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("{e}"))?;
+    let zugriffe = get_zugriffe(benutzer)?;
 
     println!("zugriffe = {:?}", zugriffe);
 
@@ -1944,16 +1962,7 @@ pub fn get_verfuegbare_grundbuecher_fuer_benutzer(
     let mut result = BTreeSet::new();
 
     for (land, amtsgericht, bezirk, blatt) in grundbuchblaetter {
-        println!("zugriffe start = {:?}", zugriffe);
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l.as_str() == land.as_str() || l.as_str() == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
-        println!("nach filter land = {:?}", zugriffe);
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag.as_str() == amtsgericht.as_str() || ag.as_str() == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
-        println!("nach filter ag = {:?}", zugriffe);
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz.as_str() == bezirk.as_str() || bz.as_str() == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
-        println!("nach filter gbz = {:?}", zugriffe);
-        let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b.as_str() == blatt.as_str() || b.as_str() == "ALLE_BLAETTER").collect::<Vec<_>>();
-        println!("nach filter blatt = {:?}", zugriffe);
-        if !zugriffe.is_empty() {
+        if benutzer_hat_zugriff_auf_blatt(&zugriffe, &land, &amtsgericht, &bezirk, &blatt) {
             result.insert((land, amtsgericht, bezirk, blatt));
         }
     }
