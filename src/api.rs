@@ -1377,15 +1377,15 @@ pub mod commit {
                 None => continue,
             };
 
-            let amtsgericht = neu.analysiert.titelblatt.amtsgericht.to_string();
-            let bezirk = neu.analysiert.titelblatt.grundbuch_von.to_string();
-            let blatt = neu.analysiert.titelblatt.blatt.to_string();
+            let amtsgericht = neu.analysiert.titelblatt.amtsgericht.clone().to_string();
+            let bezirk = neu.analysiert.titelblatt.grundbuch_von.clone().to_string();
+            let blatt = neu.analysiert.titelblatt.blatt.clone().to_string();
 
             println!("insert into grundbuecher {:#?}", &[
                 land.to_string(),
-                amtsgericht,
-                bezirk,
-                blatt,
+                amtsgericht.clone(),
+                bezirk.clone(),
+                blatt.clone(),
             ]);
 
             if !crate::db::benutzer_hat_zugriff_auf_blatt(&zugriffe, &land, &amtsgericht, &bezirk, &blatt) {
