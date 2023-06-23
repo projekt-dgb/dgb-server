@@ -1905,10 +1905,10 @@ pub fn get_zugriffe(benutzer: &BenutzerInfo) -> Result<Vec<(String, String, Stri
 }
 
 pub fn benutzer_hat_zugriff_auf_blatt(zugriffe: &[(String, String, String, String)], land: &str, amtsgericht: &str, bezirk: &str, blatt: &str) -> bool {
-    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l.as_str() == land.as_str() || l.as_str() == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
-    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag.as_str() == amtsgericht.as_str() || ag.as_str() == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
-    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz.as_str() == bezirk.as_str() || bz.as_str() == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
-    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b.as_str() == blatt.as_str() || b.as_str() == "ALLE_BLAETTER").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| l.as_str() == land || l.as_str() == "ALLE_BUNDESLAENDER").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| ag.as_str() == amtsgericht || ag.as_str() == "ALLE_AMTSGERICHTE").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| bz.as_str() == bezirk || bz.as_str() == "ALLE_GRUNDBUCHBEZIRKE").collect::<Vec<_>>();
+    let zugriffe = zugriffe.iter().filter(|(l, ag, bz, b)| b.as_str() == blatt || b.as_str() == "ALLE_BLAETTER").collect::<Vec<_>>();
     if !zugriffe.is_empty() { true } else { false }
 }
 

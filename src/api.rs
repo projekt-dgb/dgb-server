@@ -1389,7 +1389,7 @@ pub mod commit {
             ]);
 
             if !crate::db::benutzer_hat_zugriff_auf_blatt(&zugriffe, &land, &amtsgericht, &bezirk, &blatt) {
-                return response_err(500, format!("Kein Zugriff auf Blatt {land}/{amtsgericht}/{bezirk}/{blatt}"));
+                return Err(response_err(500, format!("Kein Zugriff auf Blatt {land}/{amtsgericht}/{bezirk}/{blatt}")));
             }
 
             let _ = stmt.execute(rusqlite::params![
