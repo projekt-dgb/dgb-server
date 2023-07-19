@@ -115,6 +115,9 @@ pub enum ArgAction {
         /// IP-Adresse, die der Server verwenden soll
         #[clap(long, default_value = "127.0.0.1")]
         ip: String,
+        /// Port des Servers (default 8080)
+        #[clap(long)]
+        port: Option<u16>,
     },
     /// Starte die Indexierung der Grundbuchblätter als neuen Prozess
     Indexiere,
@@ -312,7 +315,7 @@ pub struct AboLoeschenArgs {
 pub fn process_action(action: &ArgAction) -> Result<(), String> {
     use self::ArgAction::*;
     match action {
-        Start { ip } => {
+        Start { ip, port } => {
             let _ = init_logger()?;
 
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -335,7 +338,7 @@ pub fn process_action(action: &ArgAction) -> Result<(), String> {
                             serde_json::to_string(&AcmeArgs::default()).unwrap_or_default()
                         );
                     }
-                    startup_http_server(acme_args, &ip, app_state)
+                    startup_http_server(acme_args, &ip, port.clone(), app_state)
                         .await
                         .map_err(|e| format!("{e}"))
                 } else {
@@ -681,6 +684,7 @@ fn json_cfg() -> JsonConfig {
 async fn startup_http_server(
     acme_args: Option<AcmeArgs>,
     ip: &str,
+    port: Option<u16>,
     app_state: AppState,
 ) -> std::io::Result<()> {
 
@@ -715,7 +719,8 @@ async fn startup_http_server(
         Some(rustls_config)
     });
 
-    println!("dgb-server starte auf port 8080");
+    let port = port.unwrap_or(8080);
+    println!("dgb-server starte auf port {port}");
     let app_state_clone = app_state.clone();
     let a = async move {
         let app_state_clone = app_state_clone.clone();
@@ -749,7 +754,7 @@ async fn startup_http_server(
                 .service(crate::api::abo::abo_neu)
                 .service(crate::api::abo::abo_loeschen)
         })
-        .bind((ip, 8080))?
+        .bind((ip, port))?
         .run()
         .await
     };
